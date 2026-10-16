@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}Incident {{ incident.incident_id }}{% endblock %}
+
+{% block content %}
+{% set data = incident.to_dict(include_events=True) %}
+{% set ai_exp = data.ai_explanation %}
+
+<div class="page-header">
+    <div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+            <a href="{{ url_for('incidents.incidents_page') }}" style="color: var(--text-muted); text-decoration: none;">&larr; Back to Incidents</a>
+            <span style="color: var(--text-muted);">/</span>
+            <span style="font-family: monospace; font-size: 0.9rem; color: var(--accent-cyan);">{{ incident.incident_id }}</span>
+        </div>
+        <h1 class="page-title">{{ incident.title }}</h1>
+        <p class="page-subtitle">Target Identity: <code style="color: var(--accent-cyan); font-size: 0.95rem;">{{ incident.affected_user }}</code> | First Seen: {{ incident.first_observed_at.strftime('%Y-%m-%d %H:%M:%S UTC') if incident.first_observed_at else 'N/A' }}</p>
+    </div>
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <a href="{{ url_for('reports.download_incident_json', incident_id=incident.id) }}" class="btn btn-secondary btn-sm">
+            <svg style="width: 14px; height: 14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Download JSON
+        </a>
+        <a href="{{ url_for('reports.view_incident_html', incident_id=incident.id) }}" target="_blank" class="btn btn-secondary btn-sm">
+            <svg style="width: 14px; height: 14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+            Forensic Report (HTML)
+        </a>
+    </div>
+</div>
+
+<!-- Key Attributes Banner -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+    <div class="card" style="margin-bottom: 0; padding: 1.25rem;">
+        <div class="metric-label">Severity Level</div>
+        <div style="margin-top: 8px;">
+            <span class="badge {{ incident.severity | badge_color }}" style="font-size: 0.9rem; padding: 0.35rem 0.8rem;">{{ incident.severity | upper }}</span>
+        </div>
+    </div>
+    <div class="card" style="margin-bottom: 0; padding: 1.25rem;">
+        <div class="metric-label">Calculated Risk Score</div>
+        <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+            <span style="font-size: 1.8rem; font-weight: 800; color: {% if incident.risk_score >= 80 %}var(--sev-critical){% elif incident.risk_score >= 60 %}var(--sev-high){% elif incident.risk_score >= 30 %}var(--sev-medium){% else %}var(--sev-low){% endif %};">
+                {{ incident.risk_score }}
+            </span>
+            <span style="color: var(--text-muted); font-size: 0.85rem;">/ 100</span>
+        </div>
+    </div>
+    <div class="card" style="margin-bottom: 0; padding: 1.25rem;">
+        <div class="metric-label">Investigation Status</div>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
+            <span id="incident-status-badge" class="badge {{ incident.status | status_color }}">{{ incident.status }}</span>
+            <select onchange="updateStatus({{ incident.id }}, this.value)" class="form-control" style="width: auto; padding: 0.2rem 0.5rem; font-size: 0.8rem;">
+                <option value="New" {% if incident.status == 'New' %}selected{% endif %}>New</option>
+                <option value="Investigating" {% if incident.status == 'Investigating' %}selected{% endif %}>Investigating</option>
+                <option value="Contained" {% if incident.status == 'Contained' %}selected{% endif %}>Contained</option>
+                <option value="Closed" {% if incident.status == 'Closed' %}selected{% endif %}>Closed</option>
+                <option value="False Positive" {% if incident.status == 'False Positive' %}selected{% endif %}>False Positive</option>
+            </select>
+        </div>
+    </div>
+    <div class="card" style="margin-bottom: 0; padding: 1.25rem;">
+        <div class="metric-label">Evidence Volume</div>
+        <div style="font-size: 1.3rem; font-weight: 700; margin-top: 8px; color: var(--text-primary);">
+            {{ data.events | length }} Events / {{ data.alerts | length }} Alerts
+        </div>
+    </div>
+</div>
+
+<div class="incident-detail-grid">
+    <!-- Left Column: Details, Triggered Rules, Timeline -->
+    <div>
+        <!-- Executive Summary -->
+        <div class="card">
+            <h2 class="card-title">Executive Summary</h2>
+            <p style="color: #cbd5e1; font-size: 0.95rem; line-height: 1.6;">
+                {{ incident.summary or 'No analytical summary generated.' }}
+            </p>
+        </div>
+
+        <!-- Triggered Security Rules -->
+        <div class="card">
+            <h2 class="card-title">Triggered Detection Rules ({{ data.alerts | length }})</h2>
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                {% for alert in data.alerts %}
+                <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <div>
+                            <span style="font-family: monospace; font-size: 0.85rem; color: var(--accent-cyan); font-weight: 700;">[{{ alert.rule_id }}]</span>
+                            <strong style="margin-left: 6px; font-size: 0.95rem;">{{ alert.rule_name }}</strong>
+                        </div>
+                        <span class="badge {{ alert.severity | badge_color }}">{{ alert.severity | upper }}</span>
+                    </div>
+                    <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 0.75rem;">{{ alert.reason }}</p>
+                    {% if alert.suggested_investigation_steps %}
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); background: rgba(0,0,0,0.2); padding: 0.5rem 0.75rem; border-radius: 6px;">
+                        <strong style="color: var(--text-primary);">Suggested Next Steps:</strong>
+                        <ul style="padding-left: 1.2rem; margin-top: 4px;">
+                            {% for step in alert.suggested_investigation_steps %}
+                            <li>{{ step }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Correlated Event Timeline -->
+        <div class="card">
+            <h2 class="card-title">Chronological Event Timeline &amp; Forensics</h2>
+            <div class="timeline">
+                {% for ev in data.events %}
+                <div class="timeline-item">
+                    <div class="timeline-dot" style="background-color: {% if ev.outcome == 'failure' %}var(--sev-high){% elif 'admin' in (ev.new_role or '') or 'root' in (ev.new_role or '') %}var(--sev-critical){% else %}var(--accent-cyan){% endif %};"></div>
+                    <div class="timeline-content">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <div>
+                                <span class="badge" style="background: var(--bg-primary); color: var(--accent-cyan); font-family: monospace;">{{ ev.event_type }}</span>
+                                <code style="margin-left: 8px; font-size: 0.8rem;">{{ ev.event_id }}</code>
+                            </div>
+                            <span style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">{{ ev.timestamp }}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 0.85rem; margin-top: 8px;">
+                            <div><strong style="color: var(--text-muted);">Actor:</strong> {{ ev.actor or 'N/A' }}</div>
+                            <div><strong style="color: var(--text-muted);">Outcome:</strong> <span class="badge {% if ev.outcome == 'success' %}badge-low{% elif ev.outcome == 'failure' %}badge-high{% else %}badge-medium{% endif %}">{{ ev.outcome }}</span></div>
+                            {% if ev.old_role or ev.new_role %}
+                            <div><strong style="color: var(--text-muted);">Role:</strong> {{ ev.old_role or '-' }} &rarr; <span style="color: var(--accent-cyan); font-weight: 600;">{{ ev.new_role or '-' }}</span></div>
+                            {% endif %}
+                            {% if ev.resource %}
+                            <div><strong style="color: var(--text-muted);">Resource:</strong> <code>{{ ev.resource }}</code></div>
+                            {% endif %}
+                            {% if ev.source_ip %}
+                            <div><strong style="color: var(--text-muted);">Source IP:</strong> <code>{{ ev.source_ip }}</code></div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Risk Factors, AI Analysis, Containment Playbook -->
+    <div>
+        <!-- Risk Factor Breakdown -->
+        <div class="card">
+            <h2 class="card-title">Risk Score Breakdown</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Mathematical decomposition of factors contributing to the final score ({{ incident.risk_score }}/100):
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                {% for factor in data.risk_factors %}
+                <div style="background: var(--bg-card); border-left: 3px solid var(--accent-cyan); padding: 0.75rem 1rem; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-weight: 600; font-size: 0.85rem;">
+                        <span>{{ factor.factor }}</span>
+                        <span style="color: var(--accent-cyan);">+{{ factor.points }} pts</span>
+                    </div>
+                    <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 4px;">
+                        {{ factor.description }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- AI & Security Intelligence Engine -->
+        <div class="card">
+            <div class="card-title">
+                <span>Security Intelligence Analysis</span>
+                <span class="badge" style="background: var(--bg-card); color: var(--accent-purple); border: 1px solid var(--accent-purple); font-size: 0.7rem;">
+                    {{ ai_exp.provider or 'Built-in Security Intelligence Engine' }}
+                </span>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label class="form-label" style="color: var(--accent-cyan);">Why Flagged as Malicious / Anomaly:</label>
+                <div style="font-size: 0.85rem; color: #cbd5e1; background: var(--bg-card); padding: 0.75rem; border-radius: 6px;">
+                    {{ ai_exp.why_flagged or 'Detection triggered based on established security policy thresholds.' }}
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label class="form-label" style="color: var(--sev-medium);">Potential Benign Explanation:</label>
+                <div style="font-size: 0.85rem; color: #cbd5e1; background: var(--bg-card); padding: 0.75rem; border-radius: 6px;">
+                    {{ ai_exp.benign_explanation or 'Legitimate operational troubleshooting or emergency change execution.' }}
+                </div>
+            </div>
+
+            <div>
+                <label class="form-label" style="color: var(--text-muted);">Analytical Uncertainties:</label>
+                <div style="font-size: 0.85rem; color: #94a3b8; background: var(--bg-card); padding: 0.75rem; border-radius: 6px;">
+                    {{ ai_exp.uncertainties or 'Corroboration with host execution logs and network egress monitors required.' }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Simulated Containment & SOC Response Actions -->
+        <div class="card">
+            <h2 class="card-title">Incident Response &amp; Containment Simulation</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Execute simulated containment controls to validate response procedures without impacting production systems.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <button onclick="triggerSimulation({{ incident.id }}, 'lock_account')" class="btn btn-secondary" style="justify-content: flex-start; text-align: left;">
+                    <svg style="width: 16px; height: 16px; color: var(--sev-critical);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                    Simulate Account Lockout
+                </button>
+                <button onclick="triggerSimulation({{ incident.id }}, 'revoke_sessions')" class="btn btn-secondary" style="justify-content: flex-start; text-align: left;">
+                    <svg style="width: 16px; height: 16px; color: var(--sev-high);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    Simulate Invalidation of Active Sessions
+                </button>
+                <button onclick="triggerSimulation({{ incident.id }}, 'quarantine_identity')" class="btn btn-secondary" style="justify-content: flex-start; text-align: left;">
+                    <svg style="width: 16px; height: 16px; color: var(--sev-medium);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414"></path></svg>
+                    Simulate Conditional Access Isolation
+                </button>
+            </div>
+
+            <!-- Simulation activity log -->
+            <div style="margin-top: 1.25rem;">
+                <label class="form-label">Simulation Audit Trail:</label>
+                <div id="simulation-log" style="font-size: 0.8rem; color: var(--text-secondary);">
+                    <div style="padding: 6px; color: var(--text-muted); font-style: italic;">No containment simulations executed in this session yet.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/incidents.js') }}"></script>
+{% endblock %}

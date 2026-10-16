@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}Data Ingestion & Demo Lab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Identity &amp; Access Data Ingestion</h1>
+        <p class="page-subtitle">Upload enterprise authentication/privilege logs in JSON or CSV format, or load the reproducible academic demonstration suite.</p>
+    </div>
+    <div style="display: flex; gap: 0.75rem;">
+        <button id="btn-demo-generate" class="btn btn-primary">
+            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Generate Demo Dataset
+        </button>
+        <button id="btn-clear-db" class="btn btn-danger">
+            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            Clear Database
+        </button>
+    </div>
+</div>
+
+<!-- Upload Container -->
+<div class="ingestion-grid">
+    <div class="card" style="margin-bottom: 0;">
+        <h2 class="card-title">File Upload (JSON or CSV)</h2>
+        <form id="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label class="form-label">Select Security Event Log File:</label>
+                <input type="file" id="file-input" name="file" accept=".json,.csv" class="form-control" style="padding: 0.75rem;">
+                <p style="font-size: 0.775rem; color: var(--text-muted); margin-top: 6px;">
+                    Supports JSON array of events or CSV with standard headers (event_id, timestamp, username, event_type, outcome, actor, old_role, new_role, resource, etc.) Max 16MB.
+                </p>
+            </div>
+            <button type="submit" id="btn-upload" class="btn btn-primary" style="width: 100%;">
+                Upload &amp; Analyze Logs
+            </button>
+        </form>
+    </div>
+
+    <!-- Demonstration Overview -->
+    <div class="card" style="margin-bottom: 0;">
+        <h2 class="card-title">Pre-Configured Scenarios</h2>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">
+            The synthetic generator creates realistic identity attack and benign scenarios:
+        </p>
+        <ul style="font-size: 0.85rem; color: #cbd5e1; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 6px;">
+            <li><strong>Routine User Activity:</strong> Benign logins and git repo reads for <code>emily.watson</code>.</li>
+            <li><strong>Brute Force / Credential Abuse:</strong> 4 failed logins followed by compromise for <code>alex.hunter</code>.</li>
+            <li><strong>Unexpected Privilege Escalation:</strong> Self-elevation from viewer to administrator for <code>clara.oswald</code>.</li>
+            <li><strong>Unauthorized Privilege Grant:</strong> Rogue contractor assigning admin roles to <code>dev.jordan</code>.</li>
+            <li><strong>Post-Escalation Sensitive Access:</strong> Root escalation followed by vault/keys and PII database access for <code>marcus.vance</code>.</li>
+            <li><strong>Legitimate Admin Maintenance:</strong> Routine maintenance by authorized <code>secops_admin</code> (should not alert).</li>
+            <li><strong>Negative Test Inputs:</strong> Duplicated event IDs, unparseable timestamps, and missing fields.</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Upload & Ingestion Validation Results -->
+<div id="results-card" class="card" style="display: none;">
+    <h2 class="card-title">Ingestion &amp; Validation Report</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
+            <div class="metric-label">Total Records Evaluated</div>
+            <div id="res-total" style="font-size: 1.8rem; font-weight: 700;">0</div>
+        </div>
+        <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
+            <div class="metric-label">Accepted &amp; Stored</div>
+            <div id="res-accepted" style="font-size: 1.8rem; font-weight: 700; color: var(--sev-low);">0</div>
+        </div>
+        <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
+            <div class="metric-label">Rejected / Malformed</div>
+            <div id="res-rejected" style="font-size: 1.8rem; font-weight: 700; color: var(--sev-critical);">0</div>
+        </div>
+        <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
+            <div class="metric-label">Correlated Incidents Active</div>
+            <div id="res-incidents" style="font-size: 1.8rem; font-weight: 700; color: var(--accent-cyan);">0</div>
+        </div>
+    </div>
+
+    <div id="rejected-section" style="display: none;">
+        <h3 style="font-size: 1rem; color: var(--sev-critical); margin-bottom: 0.75rem;">Rejected Records &amp; Reasons</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Batch Index</th>
+                        <th>Event ID</th>
+                        <th>Rejection Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="rejected-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const uploadForm = document.getElementById("upload-form");
+    const btnDemo = document.getElementById("btn-demo-generate");
+    const btnClear = document.getElementById("btn-clear-db");
+
+    uploadForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fileInput = document.getElementById("file-input");
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert("Please select a JSON or CSV file to upload.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+
+        const btn = document.getElementById("btn-upload");
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = "Processing &amp; Validating...";
+
+        try {
+            const res = await fetch("/api/ingestion/upload", {
+                method: "POST",
+                body: formData
+            });
+            const data = await res.json();
+            if (data.success) {
+                displayResults(data.total_records, data.accepted_count, data.rejected_count, data.detection_summary?.incidents_active || 0, data.rejected_records);
+            } else {
+                alert(data.error_message || "Upload failed.");
+            }
+        } catch (err) {
+            alert("Network error occurred during file ingestion.");
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    });
+
+    btnDemo.addEventListener("click", async () => {
+        const btn = btnDemo;
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = "Generating &amp; Correlating...";
+
+        try {
+            const res = await fetch("/api/ingestion/generate_demo", { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                displayResults(data.total_generated, data.accepted_count, data.rejected_count, data.incidents_created, data.rejected_details);
+            } else {
+                alert("Failed to generate demo dataset.");
+            }
+        } catch (err) {
+            alert("Network error generating demo dataset.");
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    });
+
+    btnClear.addEventListener("click", async () => {
+        if (!confirm("Are you sure you want to clear all events and incidents from the database? This action cannot be undone.")) {
+            return;
+        }
+        try {
+            const res = await fetch("/api/ingestion/clear", { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                alert("Database reset successfully.");
+                document.getElementById("results-card").style.display = "none";
+            }
+        } catch (e) {
+            alert("Failed to clear database.");
+        }
+    });
+});
+
+function displayResults(total, accepted, rejected, incidents, rejectedList) {
+    document.getElementById("results-card").style.display = "block";
+    document.getElementById("res-total").innerText = total;
+    document.getElementById("res-accepted").innerText = accepted;
+    document.getElementById("res-rejected").innerText = rejected;
+    document.getElementById("res-incidents").innerText = incidents;
+
+    const rejSec = document.getElementById("rejected-section");
+    const rejBody = document.getElementById("rejected-table-body");
+
+    if (rejectedList && rejectedList.length > 0) {
+        rejSec.style.display = "block";
+        let rows = "";
+        for (const r of rejectedList) {
+            rows += `
+                <tr>
+                    <td>#${r.index}</td>
+                    <td><code>${escapeHtml(r.event_id || 'N/A')}</code></td>
+                    <td style="color: var(--sev-critical);">${escapeHtml(r.reason)}</td>
+                </tr>
+            `;
+        }
+        rejBody.innerHTML = rows;
+    } else {
+        rejSec.style.display = "none";
+        rejBody.innerHTML = "";
+    }
+
+    // Scroll to results
+    document.getElementById("results-card").scrollIntoView({ behavior: "smooth" });
+}
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+</script>
+{% endblock %}

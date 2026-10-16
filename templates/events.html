@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Event Explorer{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Identity &amp; Access Event Explorer</h1>
+        <p class="page-subtitle">Search, filter, and inspect ingested authentication, authorization, and privilege events.</p>
+    </div>
+    <a href="{{ url_for('ingestion.ingestion_page') }}" class="btn btn-secondary">
+        + Ingest More Events
+    </a>
+</div>
+
+<div class="filter-bar">
+    <div style="flex: 2; min-width: 220px;">
+        <label class="form-label">Search Query</label>
+        <input type="text" id="filter-search" class="form-control" placeholder="Search event ID, username, actor, IP, resource...">
+    </div>
+    <div style="flex: 1; min-width: 160px;">
+        <label class="form-label">Event Type</label>
+        <select id="filter-type" class="form-control">
+            <option value="">All Types</option>
+            <option value="login_success">login_success</option>
+            <option value="login_failure">login_failure</option>
+            <option value="role_change">role_change</option>
+            <option value="permission_grant">permission_grant</option>
+            <option value="permission_revoke">permission_revoke</option>
+            <option value="resource_access">resource_access</option>
+            <option value="access_denied">access_denied</option>
+        </select>
+    </div>
+    <div style="flex: 1; min-width: 140px;">
+        <label class="form-label">Outcome</label>
+        <select id="filter-outcome" class="form-control">
+            <option value="">All Outcomes</option>
+            <option value="success">success</option>
+            <option value="failure">failure</option>
+            <option value="denied">denied</option>
+        </select>
+    </div>
+    <div style="display: flex; gap: 0.5rem; align-self: flex-end;">
+        <button id="btn-apply-filters" class="btn btn-primary">Filter</button>
+        <button id="btn-reset-filters" class="btn btn-secondary">Reset</button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">
+        <span id="events-count-label">Showing Events (0)</span>
+        <div style="display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
+            <button id="btn-prev-page" class="btn btn-secondary btn-sm" disabled>&larr; Prev</button>
+            <span id="page-indicator" style="color: var(--text-secondary);">Page 1 of 1</span>
+            <button id="btn-next-page" class="btn btn-secondary btn-sm" disabled>Next &rarr;</button>
+        </div>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Event ID</th>
+                    <th>Target User</th>
+                    <th>Event Type</th>
+                    <th>Actor</th>
+                    <th>Role Transition</th>
+                    <th>Target Resource</th>
+                    <th>Outcome</th>
+                    <th>Source IP</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="events-table-body">
+                <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading events...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Event Detail Modal -->
+<div id="event-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-event-title">Event Forensic Record</h3>
+            <button id="btn-close-modal" class="btn btn-secondary btn-sm">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-event-details" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; font-size: 0.85rem;"></div>
+            <label class="form-label">Raw Ingested JSON Payload:</label>
+            <pre id="modal-raw-json"></pre>
+        </div>
+        <div class="modal-footer">
+            <button id="btn-close-modal-footer" class="btn btn-secondary">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadEvents();
+
+    document.getElementById("btn-apply-filters").addEventListener("click", () => {
+        currentPage = 1;
+        loadEvents();
+    });
+
+    document.getElementById("btn-reset-filters").addEventListener("click", () => {
+        document.getElementById("filter-search").value = "";
+        document.getElementById("filter-type").value = "";
+        document.getElementById("filter-outcome").value = "";
+        currentPage = 1;
+        loadEvents();
+    });
+
+    document.getElementById("btn-prev-page").addEventListener("click", () => {
+        if (currentPage > 1) {
+            currentPage--;
+            loadEvents();
+        }
+    });
+
+    document.getElementById("btn-next-page").addEventListener("click", () => {
+        currentPage++;
+        loadEvents();
+    });
+
+    document.getElementById("btn-close-modal").addEventListener("click", closeModal);
+    document.getElementById("btn-close-modal-footer").addEventListener("click", closeModal);
+});
+
+async function loadEvents() {
+    const search = document.getElementById("filter-search").value;
+    const type = document.getElementById("filter-type").value;
+    const outcome = document.getElementById("filter-outcome").value;
+
+    const url = `/api/events?page=${currentPage}&per_page=20&search=${encodeURIComponent(search)}&event_type=${encodeURIComponent(type)}&outcome=${encodeURIComponent(outcome)}`;
+    const tbody = document.getElementById("events-table-body");
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        document.getElementById("events-count-label").innerText = `Total Recorded Events: ${data.total}`;
+        document.getElementById("page-indicator").innerText = `Page ${data.page} of ${data.total_pages || 1}`;
+        document.getElementById("btn-prev-page").disabled = (data.page <= 1);
+        document.getElementById("btn-next-page").disabled = (data.page >= data.total_pages);
+
+        if (!data.events || data.events.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No matching events found.</td></tr>`;
+            return;
+        }
+
+        let rows = "";
+        for (const ev of data.events) {
+            const timeStr = ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "N/A";
+            const roleTransition = (ev.new_role || ev.old_role) ? `${ev.old_role || '-'} &rarr; ${ev.new_role || '-'}` : "-";
+            const outcomeBadge = ev.outcome === "success" ? "badge-low" : ev.outcome === "failure" ? "badge-high" : "badge-medium";
+
+            rows += `
+                <tr>
+                    <td style="font-family: monospace; font-size: 0.8rem;">${timeStr}</td>
+                    <td><code>${escapeHtml(ev.event_id)}</code></td>
+                    <td><strong>${escapeHtml(ev.username)}</strong></td>
+                    <td><span class="badge" style="background: var(--bg-card); color: var(--accent-cyan);">${escapeHtml(ev.event_type)}</span></td>
+                    <td>${escapeHtml(ev.actor || '-')}</td>
+                    <td>${roleTransition}</td>
+                    <td><span title="${escapeHtml(ev.resource || '')}">${escapeHtml(ev.resource || '-')}</span></td>
+                    <td><span class="badge ${outcomeBadge}">${escapeHtml(ev.outcome)}</span></td>
+                    <td><code style="color: var(--text-muted);">${escapeHtml(ev.source_ip || '-')}</code></td>
+                    <td>
+                        <button class="btn btn-secondary btn-sm" onclick="viewEventDetail(${ev.id})">Details</button>
+                    </td>
+                </tr>
+            `;
+        }
+        tbody.innerHTML = rows;
+
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--sev-critical); padding: 2rem;">Error loading events from database.</td></tr>`;
+    }
+}
+
+async function viewEventDetail(id) {
+    try {
+        const res = await fetch(`/api/events/${id}`);
+        const ev = await res.json();
+
+        document.getElementById("modal-event-title").innerText = `Forensic Record: ${ev.event_id}`;
+        document.getElementById("modal-event-details").innerHTML = `
+            <div><strong>Timestamp:</strong> ${ev.timestamp}</div>
+            <div><strong>Event Type:</strong> ${ev.event_type}</div>
+            <div><strong>Target User:</strong> ${ev.username}</div>
+            <div><strong>Actor:</strong> ${ev.actor || 'N/A'}</div>
+            <div><strong>Outcome:</strong> ${ev.outcome}</div>
+            <div><strong>Source IP:</strong> ${ev.source_ip || 'N/A'}</div>
+            <div><strong>Resource:</strong> ${ev.resource || 'N/A'}</div>
+            <div><strong>Session ID:</strong> ${ev.session_id || 'N/A'}</div>
+        `;
+        document.getElementById("modal-raw-json").innerText = JSON.stringify(ev.raw_data, null, 2);
+        document.getElementById("event-modal").classList.add("active");
+    } catch (err) {
+        alert("Failed to load event forensic detail.");
+    }
+}
+
+function closeModal() {
+    document.getElementById("event-modal").classList.remove("active");
+}
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+</script>
+{% endblock %}

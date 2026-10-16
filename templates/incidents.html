@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Incident Center{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Correlated Incident Center</h1>
+        <p class="page-subtitle">Grouped security incidents correlated across identity signals, temporal patterns, and attack rules.</p>
+    </div>
+    <div style="display: flex; gap: 0.75rem;">
+        <button id="btn-re-detect" class="btn btn-secondary">
+            Re-run Correlation Engine
+        </button>
+        <a href="{{ url_for('reports.reports_page') }}" class="btn btn-primary">
+            Export Incident Reports
+        </a>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <div style="flex: 2; min-width: 200px;">
+        <label class="form-label">Search Incidents</label>
+        <input type="text" id="inc-search" class="form-control" placeholder="Search by Incident ID, user, or title...">
+    </div>
+    <div style="flex: 1; min-width: 140px;">
+        <label class="form-label">Severity</label>
+        <select id="inc-severity" class="form-control">
+            <option value="">All Severities</option>
+            <option value="critical">Critical (80-100)</option>
+            <option value="high">High (60-79)</option>
+            <option value="medium">Medium (30-59)</option>
+            <option value="low">Low (0-29)</option>
+        </select>
+    </div>
+    <div style="flex: 1; min-width: 140px;">
+        <label class="form-label">Status</label>
+        <select id="inc-status" class="form-control">
+            <option value="">All Statuses</option>
+            <option value="New">New</option>
+            <option value="Investigating">Investigating</option>
+            <option value="Contained">Contained</option>
+            <option value="Closed">Closed</option>
+            <option value="False Positive">False Positive</option>
+        </select>
+    </div>
+    <div style="flex: 1; min-width: 160px;">
+        <label class="form-label">Sort By</label>
+        <select id="inc-sort" class="form-control">
+            <option value="risk_desc">Risk Score: High to Low</option>
+            <option value="risk_asc">Risk Score: Low to High</option>
+            <option value="date_desc">Last Observed: Newest First</option>
+            <option value="date_asc">Last Observed: Oldest First</option>
+        </select>
+    </div>
+    <div style="align-self: flex-end;">
+        <button id="btn-filter-incidents" class="btn btn-primary">Filter</button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">
+        <span id="incidents-header-count">Active Incidents</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Incident ID</th>
+                    <th>Threat Scenario / Title</th>
+                    <th>Affected Identity</th>
+                    <th>Severity</th>
+                    <th>Risk Score</th>
+                    <th>Last Observed</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="incidents-table-body">
+                <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading incidents...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/incidents.js') }}"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    loadIncidents();
+
+    document.getElementById("btn-filter-incidents").addEventListener("click", loadIncidents);
+    document.getElementById("inc-search").addEventListener("keyup", (e) => {
+        if (e.key === "Enter") loadIncidents();
+    });
+    document.getElementById("inc-severity").addEventListener("change", loadIncidents);
+    document.getElementById("inc-status").addEventListener("change", loadIncidents);
+    document.getElementById("inc-sort").addEventListener("change", loadIncidents);
+
+    document.getElementById("btn-re-detect").addEventListener("click", async () => {
+        try {
+            const res = await fetch("/api/incidents/run_detection", { method: "POST" });
+            const data = await res.json();
+            showToast(`Correlation complete: ${data.incidents_created_or_updated} incidents analyzed.`, "success");
+            loadIncidents();
+        } catch (e) {
+            showToast("Failed to re-run correlation.", "error");
+        }
+    });
+});
+
+async function loadIncidents() {
+    const search = document.getElementById("inc-search").value;
+    const severity = document.getElementById("inc-severity").value;
+    const status = document.getElementById("inc-status").value;
+    const sort = document.getElementById("inc-sort").value;
+
+    const url = `/api/incidents?search=${encodeURIComponent(search)}&severity=${encodeURIComponent(severity)}&status=${encodeURIComponent(status)}&sort=${encodeURIComponent(sort)}`;
+    const tbody = document.getElementById("incidents-table-body");
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        document.getElementById("incidents-header-count").innerText = `Correlated Incidents (${data.total})`;
+
+        if (!data.incidents || data.incidents.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No security incidents match the selected criteria.</td></tr>`;
+            return;
+        }
+
+        let rows = "";
+        for (const inc of data.incidents) {
+            const sevClass = `badge-${inc.severity.toLowerCase()}`;
+            const timeStr = inc.last_observed_at ? new Date(inc.last_observed_at).toLocaleString() : "N/A";
+
+            // Risk bar percentage
+            const scoreColor = inc.risk_score >= 80 ? "var(--sev-critical)" : inc.risk_score >= 60 ? "var(--sev-high)" : inc.risk_score >= 30 ? "var(--sev-medium)" : "var(--sev-low)";
+
+            rows += `
+                <tr>
+                    <td><strong><a href="/incidents/${inc.id}" style="color: var(--accent-cyan); text-decoration: none;">${inc.incident_id}</a></strong></td>
+                    <td style="max-width: 320px;">
+                        <a href="/incidents/${inc.id}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">${escapeHtml(inc.title)}</a>
+                    </td>
+                    <td><code>${escapeHtml(inc.affected_user)}</code></td>
+                    <td><span class="badge ${sevClass}">${inc.severity.toUpperCase()}</span></td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 700; color: ${scoreColor}; width: 24px;">${inc.risk_score}</span>
+                            <div style="background: var(--bg-card); width: 60px; height: 6px; border-radius: 3px; overflow: hidden;">
+                                <div style="background: ${scoreColor}; width: ${inc.risk_score}%; height: 100%;"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">${timeStr}</td>
+                    <td>
+                        <select onchange="updateStatus(${inc.id}, this.value)" class="form-control" style="padding: 0.2rem 0.5rem; font-size: 0.775rem; width: auto;">
+                            <option value="New" ${inc.status === 'New' ? 'selected' : ''}>New</option>
+                            <option value="Investigating" ${inc.status === 'Investigating' ? 'selected' : ''}>Investigating</option>
+                            <option value="Contained" ${inc.status === 'Contained' ? 'selected' : ''}>Contained</option>
+                            <option value="Closed" ${inc.status === 'Closed' ? 'selected' : ''}>Closed</option>
+                            <option value="False Positive" ${inc.status === 'False Positive' ? 'selected' : ''}>False Positive</option>
+                        </select>
+                    </td>
+                    <td>
+                        <a href="/incidents/${inc.id}" class="btn btn-secondary btn-sm">Investigate &rarr;</a>
+                    </td>
+                </tr>
+            `;
+        }
+        tbody.innerHTML = rows;
+
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--sev-critical); padding: 2rem;">Error retrieving incidents.</td></tr>`;
+    }
+}
+</script>
+{% endblock %}
