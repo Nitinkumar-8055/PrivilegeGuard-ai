@@ -8,10 +8,14 @@
         <h1 class="page-title">Forensic Reports &amp; Export Center</h1>
         <p class="page-subtitle">Download structured JSON evidence packages or view printable executive incident reports.</p>
     </div>
-    <div style="display: flex; gap: 0.75rem;">
-        <a href="{{ url_for('reports.download_platform_json') }}" class="btn btn-primary">
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <a href="{{ url_for('reports.download_synopsis_pdf') }}" class="btn btn-primary" style="background: linear-gradient(135deg, #2563eb, #7c3aed); box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);">
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            Export Complete Platform JSON Summary
+            Download Project Synopsis (PDF)
+        </a>
+        <a href="{{ url_for('reports.download_platform_json') }}" class="btn btn-secondary">
+            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Export Platform JSON Summary
         </a>
     </div>
 </div>

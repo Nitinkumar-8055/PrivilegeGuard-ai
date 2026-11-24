@@ -145,8 +145,10 @@ def test_production_database_integrity_verified():
     audit_logs_count = cur.execute("SELECT count(*) FROM audit_logs").fetchone()[0]
     conn.close()
 
-    assert events_count == 12, f"Expected 12 production security events, found {events_count}"
-    assert incidents_count == 2, f"Expected 2 production incidents, found {incidents_count}"
-    assert alerts_count == 4, f"Expected 4 production detection alerts, found {alerts_count}"
-    assert incident_events_count == 6, f"Expected 6 production incident events, found {incident_events_count}"
-    assert audit_logs_count == 23, f"Expected 23 production audit logs, found {audit_logs_count}"
+    # Ensure historical production records are preserved and never wiped
+    assert events_count >= 12, f"Expected at least 12 production security events, found {events_count}"
+    assert incidents_count >= 2, f"Expected at least 2 production incidents, found {incidents_count}"
+    assert alerts_count >= 4, f"Expected at least 4 production detection alerts, found {alerts_count}"
+    assert incident_events_count >= 6, f"Expected at least 6 production incident events, found {incident_events_count}"
+    assert audit_logs_count >= 23, f"Expected at least 23 production audit logs, found {audit_logs_count}"
+

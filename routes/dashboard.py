@@ -42,11 +42,17 @@ def get_stats():
         "False Positive": Incident.query.filter_by(status="False Positive").count()
     }
 
-    # Recent incidents (up to 5)
+    # Recent incidents (up to 6)
     recent_incidents = Incident.query.order_by(
         Incident.created_at.desc()
     ).limit(6).all()
     recent_incidents_data = [inc.to_dict(include_events=False) for inc in recent_incidents]
+
+    # Recent security events (latest 6)
+    recent_events = SecurityEvent.query.order_by(
+        SecurityEvent.timestamp.desc()
+    ).limit(6).all()
+    recent_events_data = [ev.to_dict() for ev in recent_events]
 
     # Event activity over time (aggregate by day or 1-hour slots)
     events = SecurityEvent.query.order_by(SecurityEvent.timestamp.asc()).all()
@@ -60,6 +66,9 @@ def get_stats():
     timeline_labels = list(activity_buckets.keys())[-15:]
     timeline_values = [activity_buckets[k] for k in timeline_labels]
 
+    from services.collector import WindowsSecurityCollector
+    collector_info = WindowsSecurityCollector.get_instance().get_status()
+
     return jsonify({
         "total_events": total_events,
         "total_incidents": total_incidents,
@@ -71,5 +80,8 @@ def get_stats():
             "labels": timeline_labels,
             "data": timeline_values
         },
-        "recent_incidents": recent_incidents_data
+        "recent_incidents": recent_incidents_data,
+        "recent_events": recent_events_data,
+        "collector": collector_info
     })
+

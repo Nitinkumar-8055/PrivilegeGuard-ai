@@ -379,6 +379,233 @@ class RuleAccessDeniedSpike(BaseDetectionRule):
         return alerts
 
 
+class RuleSecurityLogCleared(BaseDetectionRule):
+    """
+    Rule 6: Detects clearing of the Windows Security audit log (Event 1102 / action security_audit_log_cleared).
+    Represents critical anti-forensics or log tampering activity.
+    """
+    rule_id = "RULE-006"
+    rule_name = "Security Audit Log Cleared / Tampering"
+    severity = "critical"
+    description = "Flags intentional clearing of the Windows Security audit log, indicating defensive evasion or anti-forensics."
+
+    def evaluate(self, events: List[Any], config: Any) -> List[Dict[str, Any]]:
+        alerts = []
+        for ev in events:
+            action = getattr(ev, "action", "") or ""
+            resource = getattr(ev, "resource", "") or ""
+            raw = getattr(ev, "raw_data", None)
+            is_1102 = False
+            if raw:
+                try:
+                    meta = json.loads(raw) if isinstance(raw, str) else raw
+                    if meta.get("windows_event_id") == 1102:
+                        is_1102 = True
+                except Exception:
+                    pass
+
+            if is_1102 or "security_audit_log_cleared" in action or "audit_log_cleared" in action or ("Security Event Log" in resource and "cleared" in action.lower()):
+                actor = getattr(ev, "actor", None) or getattr(ev, "username", "unknown")
+                alerts.append({
+                    "rule_id": self.rule_id,
+                    "rule_name": self.rule_name,
+                    "affected_user": actor,
+                    "severity": self.severity,
+                    "reason": f"Windows Security audit log was cleared by user/actor '{actor}'. Anti-forensic activity detected.",
+                    "suggested_investigation_steps": [
+                        f"Immediately isolate host '{getattr(ev, 'resource', 'target')}' from the corporate network.",
+                        f"Audit active sessions and recent authentication for account '{actor}'.",
+                        "Review secondary SIEM, Sysmon, and NetFlow telemetry for contemporaneous data staging or exfiltration.",
+                        "Re-enable Security auditing baseline immediately."
+                    ],
+                    "relevant_event_ids": [ev.event_id],
+                    "detected_at": datetime.now(timezone.utc)
+                })
+        return alerts
+
+
+class RulePrivilegedGroupMembershipAdded(BaseDetectionRule):
+    """
+    Rule 7: Detects addition of user accounts into sensitive administrative groups (Events 4728, 4732).
+    """
+    rule_id = "RULE-007"
+    rule_name = "Privileged Security Group Membership Addition"
+    severity = "high"
+    description = "Detects additions to privileged security groups such as Administrators or Domain Admins."
+
+    def evaluate(self, events: List[Any], config: Any) -> List[Dict[str, Any]]:
+        sensitive_roles = set(r.lower() for r in getattr(config, "SENSITIVE_ROLES", []))
+        sensitive_roles.update(["administrators", "domain admins", "enterprise admins", "schema admins", "backup operators", "account operators"])
+        authorized_managers = set(m.lower() for m in getattr(config, "AUTHORIZED_ROLE_MANAGERS", []))
+
+        alerts = []
+        for ev in events:
+            action = getattr(ev, "action", "") or ""
+            new_role = (getattr(ev, "new_role", "") or "").lower()
+            resource = (getattr(ev, "resource", "") or "").lower()
+
+            if "group_member_added" in action or any(sr in new_role for sr in sensitive_roles) or any(sr in resource for sr in sensitive_roles):
+                target_user = getattr(ev, "username", "unknown")
+                actor = getattr(ev, "actor", None) or getattr(ev, "username", "unknown")
+                
+                # Check if group is sensitive
+                is_sensitive = any(sr in new_role for sr in sensitive_roles) or any(sr in resource for sr in sensitive_roles)
+                if not is_sensitive:
+                    continue
+
+                is_unauthorized_actor = actor.lower() not in authorized_managers and actor != "SYSTEM"
+                severity = "critical" if is_unauthorized_actor and actor.lower() == target_user.lower() else ("high" if is_unauthorized_actor else "medium")
+
+                alerts.append({
+                    "rule_id": self.rule_id,
+                    "rule_name": self.rule_name,
+                    "affected_user": target_user,
+                    "severity": severity,
+                    "reason": f"Account '{target_user}' was added to privileged group '{getattr(ev, 'new_role') or getattr(ev, 'resource')}' by actor '{actor}'.",
+                    "suggested_investigation_steps": [
+                        f"Verify change request authorization for promoting '{target_user}'.",
+                        f"Inspect actor account '{actor}' for potential compromise or unauthorized helpdesk delegation.",
+                        "Audit target user's active sessions and MFA enrollment status."
+                    ],
+                    "relevant_event_ids": [ev.event_id],
+                    "detected_at": datetime.now(timezone.utc)
+                })
+        return alerts
+
+
+class RuleSuspiciousAccountCreation(BaseDetectionRule):
+    """
+    Rule 8: Detects new local or domain account creation or enablement (Events 4720, 4722).
+    """
+    rule_id = "RULE-008"
+    rule_name = "Suspicious Account Creation / Enablement"
+    severity = "medium"
+    description = "Detects newly created or enabled user accounts, flagging potential backdoor or persistence establishment."
+
+    def evaluate(self, events: List[Any], config: Any) -> List[Dict[str, Any]]:
+        authorized_managers = set(m.lower() for m in getattr(config, "AUTHORIZED_ROLE_MANAGERS", []))
+        alerts = []
+        for ev in events:
+            action = getattr(ev, "action", "") or ""
+            if "account_created" in action or "account_enabled" in action:
+                target_user = getattr(ev, "username", "unknown")
+                actor = getattr(ev, "actor", None) or "SYSTEM"
+                is_unauth = actor.lower() not in authorized_managers and actor != "SYSTEM"
+                severity = "high" if is_unauth else "medium"
+
+                alerts.append({
+                    "rule_id": self.rule_id,
+                    "rule_name": self.rule_name,
+                    "affected_user": target_user,
+                    "severity": severity,
+                    "reason": f"Account '{target_user}' was {action.replace('_', ' ')} by actor '{actor}'. Potential persistence or unauthorized identity provisioning.",
+                    "suggested_investigation_steps": [
+                        f"Verify HR/IAM ticketing authorization for creating account '{target_user}'.",
+                        f"Check if account '{target_user}' has been granted elevated group memberships.",
+                        f"Review source workstation and IP from which '{actor}' initiated the account change."
+                    ],
+                    "relevant_event_ids": [ev.event_id],
+                    "detected_at": datetime.now(timezone.utc)
+                })
+        return alerts
+
+
+class RuleMultiAccountAuthenticationSpraying(BaseDetectionRule):
+    """
+    Rule 9: Detects authentication failures against multiple distinct accounts from the same source IP / host.
+    Indicates password spraying or brute force enumeration.
+    """
+    rule_id = "RULE-009"
+    rule_name = "Multi-Account Password Spraying"
+    severity = "high"
+    description = "Flags multiple authentication failures originating from a single source across distinct usernames."
+
+    def evaluate(self, events: List[Any], config: Any) -> List[Dict[str, Any]]:
+        window_minutes = getattr(config, "FAILED_LOGIN_WINDOW_MINUTES", 15)
+        window_delta = timedelta(minutes=window_minutes)
+
+        # Group failed logins by source_ip
+        ip_failures: Dict[str, List[Any]] = {}
+        for ev in events:
+            if getattr(ev, "event_type", "") == "login_failure" and getattr(ev, "source_ip", None):
+                ip = ev.source_ip
+                if ip not in ("127.0.0.1", "::1", "localhost"):
+                    ip_failures.setdefault(ip, []).append(ev)
+
+        alerts = []
+        for ip, failures in ip_failures.items():
+            failures.sort(key=lambda x: x.timestamp)
+            i = 0
+            while i < len(failures):
+                start_time = failures[i].timestamp
+                cluster = []
+                distinct_users = set()
+                j = i
+                while j < len(failures) and failures[j].timestamp - start_time <= window_delta:
+                    cluster.append(failures[j])
+                    distinct_users.add(failures[j].username)
+                    j += 1
+
+                # If >= 3 distinct users targeted from same IP
+                if len(distinct_users) >= 3:
+                    event_ids = [f.event_id for f in cluster]
+                    user_list_str = ", ".join(sorted(list(distinct_users))[:5])
+                    alerts.append({
+                        "rule_id": self.rule_id,
+                        "rule_name": self.rule_name,
+                        "affected_user": f"Multiple ({len(distinct_users)} accounts)",
+                        "severity": self.severity,
+                        "reason": f"Observed password spraying from source IP '{ip}' targeting {len(distinct_users)} distinct accounts ({user_list_str}) within {window_minutes} minutes.",
+                        "suggested_investigation_steps": [
+                            f"Block or throttle inbound traffic from source IP '{ip}' at perimeter firewall.",
+                            f"Check if any targeted accounts ({user_list_str}) experienced a subsequent successful login.",
+                            "Enforce MFA challenge on all targeted identities."
+                        ],
+                        "relevant_event_ids": event_ids,
+                        "detected_at": datetime.now(timezone.utc)
+                    })
+                    i = j - 1
+                i += 1
+        return alerts
+
+
+class RuleExplicitCredentialAbuse(BaseDetectionRule):
+    """
+    Rule 10: Detects logons using explicit credentials (Event 4648) where caller and target differ.
+    """
+    rule_id = "RULE-010"
+    rule_name = "Explicit Credential Logon Abuse"
+    severity = "medium"
+    description = "Detects processes attempting logons using alternate explicit credentials (e.g. runas / secondary identity)."
+
+    def evaluate(self, events: List[Any], config: Any) -> List[Dict[str, Any]]:
+        sensitive_roles = set(r.lower() for r in getattr(config, "SENSITIVE_ROLES", []))
+        alerts = []
+        for ev in events:
+            action = getattr(ev, "action", "") or ""
+            if "explicit_credentials" in action:
+                actor = getattr(ev, "actor", None)
+                target = getattr(ev, "username", None)
+                if actor and target and actor.lower() != target.lower():
+                    is_admin_target = any(r in target.lower() for r in sensitive_roles) or "admin" in target.lower()
+                    sev = "high" if is_admin_target else "medium"
+                    alerts.append({
+                        "rule_id": self.rule_id,
+                        "rule_name": self.rule_name,
+                        "affected_user": target,
+                        "severity": sev,
+                        "reason": f"Actor '{actor}' initiated an authentication attempt using explicit credentials for target account '{target}'. Potential lateral movement or privilege switching.",
+                        "suggested_investigation_steps": [
+                            f"Confirm if user '{actor}' has legitimate administrative responsibilities over '{target}'.",
+                            "Verify endpoint process execution to determine if tools like RunAs, PsExec, or mimikatz were invoked.",
+                            "Check target host session duration and commands executed."
+                        ],
+                        "relevant_event_ids": [ev.event_id],
+                        "detected_at": datetime.now(timezone.utc)
+                    })
+        return alerts
+
+
 class DetectionEngine:
     """Orchestrates all security detection rules against ingested events."""
 
@@ -389,7 +616,12 @@ class DetectionEngine:
             RuleUnexpectedPrivilegeEscalation(),
             RuleUnauthorizedPrivilegeGrant(),
             RuleSensitiveAccessFollowingPrivilegeChange(),
-            RuleAccessDeniedSpike()
+            RuleAccessDeniedSpike(),
+            RuleSecurityLogCleared(),
+            RulePrivilegedGroupMembershipAdded(),
+            RuleSuspiciousAccountCreation(),
+            RuleMultiAccountAuthenticationSpraying(),
+            RuleExplicitCredentialAbuse()
         ]
 
     def run_detection(self, events: List[Any]) -> List[Dict[str, Any]]:
@@ -410,3 +642,4 @@ class DetectionEngine:
                 print(f"Error evaluating rule {rule.rule_id}: {str(e)}")
 
         return all_alerts
+

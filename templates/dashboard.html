@@ -5,13 +5,17 @@
 {% block content %}
 <div class="page-header">
     <div>
-        <h1 class="page-title">Identity & Privilege Security Overview</h1>
-        <p class="page-subtitle">Real-time surveillance of authentication anomalies, unauthorized escalations, and sensitive resource access.</p>
+        <h1 class="page-title">Identity &amp; Threat Detection Center</h1>
+        <p class="page-subtitle">Continuous Windows Security log surveillance, credential abuse detection, and real-time incident correlation.</p>
     </div>
-    <div style="display: flex; gap: 0.75rem;">
-        <button id="btn-run-detection" class="btn btn-secondary">
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <button id="btn-poll-once" class="btn btn-secondary" title="Execute a single immediate event log poll">
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            Run Detection Engine
+            Poll Now
+        </button>
+        <button id="btn-run-detection" class="btn btn-secondary">
+            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Run Rules
         </button>
         <a href="{{ url_for('ingestion.ingestion_page') }}" class="btn btn-primary">
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
@@ -20,11 +24,46 @@
     </div>
 </div>
 
+<!-- Windows Event Collector Status Card -->
+<div class="card" style="border-left: 4px solid var(--accent-cyan); margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.35rem;">
+                <span style="font-size: 1.05rem; font-weight: 700; color: #fff;">Windows Security Log Collector</span>
+                <span id="collector-status-badge" class="badge badge-medium">CHECKING...</span>
+                <span id="collector-source-badge" style="font-size: 0.75rem; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 0.2rem 0.5rem; border-radius: 4px;">Detecting Source</span>
+            </div>
+            <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                <span>Channel: <strong id="collector-channel" style="color: var(--text-main);">Security</strong></span>
+                <span>Last Record Bookmark: <strong id="collector-checkpoint" style="color: var(--accent-cyan);">#0</strong></span>
+                <span>Last Poll: <strong id="collector-last-poll" style="color: var(--text-main);">Never</strong></span>
+                <span>Events Collected: <strong id="collector-total-collected" style="color: #10b981;">0</strong></span>
+                <span>Polling Interval: <strong id="collector-interval" style="color: var(--text-main);">5.0s</strong></span>
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <button id="btn-collector-start" class="btn btn-secondary btn-sm" style="color: #10b981; border-color: rgba(16,185,129,0.3);">
+                ▶ Start Collector
+            </button>
+            <button id="btn-collector-stop" class="btn btn-secondary btn-sm" style="color: #ef4444; border-color: rgba(239,68,68,0.3);">
+                ⏹ Stop Collector
+            </button>
+        </div>
+    </div>
+    <div id="collector-error-alert" style="display: none; margin-top: 0.85rem; padding: 0.75rem 1rem; border-radius: 6px; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); font-size: 0.825rem; color: #fca5a5;">
+        <strong>Collector Notice:</strong> <span id="collector-error-text"></span>
+        <div id="collector-elevation-guide" style="margin-top: 0.4rem; color: #cbd5e1; font-size: 0.8rem;">
+            <em>To read the live Windows Security Event Log, start PrivilegeGuard AI in an elevated console:</em><br>
+            <code>Start-Process powershell -Verb runAs</code> &rarr; <code>python app.py</code>
+        </div>
+    </div>
+</div>
+
 <div class="metrics-grid">
     <div class="metric-card">
         <div class="metric-label">Total Events Ingested</div>
         <div class="metric-value" id="stat-total-events" style="color: var(--accent-cyan);">--</div>
-        <div class="metric-sub">JSON &amp; CSV Identity Logs</div>
+        <div class="metric-sub">Windows Security &amp; Identity Logs</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Correlated Incidents</div>
@@ -58,6 +97,7 @@
     </div>
 </div>
 
+<!-- Recent Correlated Incidents -->
 <div class="card">
     <div class="card-title">
         <span>Recent Correlated Incidents</span>
@@ -81,6 +121,32 @@
         </table>
     </div>
 </div>
+
+<!-- Live Arriving Security Events Feed -->
+<div class="card">
+    <div class="card-title">
+        <span>Live Arriving Security Events</span>
+        <a href="{{ url_for('events.events_page') }}" class="btn btn-secondary btn-sm">View All Events &rarr;</a>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Event ID</th>
+                    <th>Timestamp</th>
+                    <th>Identity / User</th>
+                    <th>Event Type</th>
+                    <th>Action / Details</th>
+                    <th>Source IP</th>
+                    <th>Outcome</th>
+                </tr>
+            </thead>
+            <tbody id="recent-events-body">
+                <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading live event stream...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -90,7 +156,7 @@ document.getElementById("btn-run-detection").addEventListener("click", async fun
     const btn = this;
     const origText = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = "Evaluating Security Rules...";
+    btn.innerHTML = "Evaluating Rules...";
     try {
         const res = await fetch("/api/incidents/run_detection", { method: "POST" });
         const data = await res.json();
@@ -102,6 +168,38 @@ document.getElementById("btn-run-detection").addEventListener("click", async fun
         btn.disabled = false;
         btn.innerHTML = origText;
     }
+});
+
+document.getElementById("btn-poll-once").addEventListener("click", async function() {
+    const btn = this;
+    btn.disabled = true;
+    try {
+        const res = await fetch("/api/collector/poll_once", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            loadDashboardStats();
+        } else {
+            alert(`Poll check failed: ${data.error || 'Unknown error'}`);
+        }
+    } catch(err) {
+        alert("Failed to trigger poll.");
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+document.getElementById("btn-collector-start").addEventListener("click", async function() {
+    const res = await fetch("/api/collector/start", { method: "POST" });
+    const data = await res.json();
+    if (!data.success && data.error) {
+        alert(`Collector notice: ${data.error}`);
+    }
+    loadDashboardStats();
+});
+
+document.getElementById("btn-collector-stop").addEventListener("click", async function() {
+    await fetch("/api/collector/stop", { method: "POST" });
+    loadDashboardStats();
 });
 </script>
 {% endblock %}

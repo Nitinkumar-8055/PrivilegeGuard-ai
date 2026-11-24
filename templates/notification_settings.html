@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %}Notification & Alert Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Notification & Alert Management Settings</h1>
+        <p class="page-subtitle">Configure outbound Gmail SMTP transmission, administrator email routing, and in-app alert thresholds.</p>
+    </div>
+    <div style="display: flex; gap: 0.75rem;">
+        <a href="{{ url_for('notifications.history_page') }}" class="btn btn-secondary">
+            &larr; View Notification History
+        </a>
+    </div>
+</div>
+
+<div id="settings-alert" style="display: none; margin-bottom: 1.5rem; padding: 1rem 1.25rem; border-radius: 6px; font-size: 0.9rem;"></div>
+
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
+    <!-- Main Configuration Form -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- Card 1: Email Configuration (Gmail SMTP) -->
+        <div class="card">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Email Transmission & Gmail SMTP</span>
+                <span class="badge badge-secondary" style="font-size: 0.75rem;">Channel A</span>
+            </div>
+            <div style="margin-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+                    <div>
+                        <div style="font-weight: 600; color: var(--text-primary);">Enable Email Alerts</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">Transmit automated emails to the administrator for qualifying security incidents.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="email-enabled-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div>
+                        <label class="form-label">Administrator Recipient Email</label>
+                        <input type="email" id="admin-email" class="form-control" placeholder="nk8055444@gmail.com">
+                        <span class="form-help">Destination inbox for high/critical security escalations.</span>
+                    </div>
+                    <div>
+                        <label class="form-label">SMTP Sender Email Account</label>
+                        <input type="email" id="smtp-sender" class="form-control" placeholder="your-sender@gmail.com">
+                        <span class="form-help">Authorized Gmail address used as the sending account.</span>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div>
+                        <label class="form-label">SMTP Host</label>
+                        <input type="text" id="smtp-host" class="form-control" value="smtp.gmail.com">
+                        <span class="form-help">Default: smtp.gmail.com</span>
+                    </div>
+                    <div>
+                        <label class="form-label">SMTP Port</label>
+                        <input type="number" id="smtp-port" class="form-control" value="465">
+                        <span class="form-help">465 (SSL) or 587 (TLS)</span>
+                    </div>
+                    <div>
+                        <label class="form-label">Security Protocol</label>
+                        <select id="smtp-security" class="form-control">
+                            <option value="SSL">SSL (Port 465)</option>
+                            <option value="TLS">STARTTLS (Port 587)</option>
+                        </select>
+                        <span class="form-help">Default: SSL</span>
+                    </div>
+                </div>
+
+                <div style="padding: 0.85rem 1rem; background: rgba(56, 189, 248, 0.08); border-left: 3px solid var(--accent-cyan); border-radius: 4px; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                    <strong style="color: var(--accent-cyan);">&#128274; Security Note:</strong>
+                    Gmail App Passwords must be defined via the <code>SMTP_PASSWORD</code> environment variable in your local <code>.env</code> file. For security and defense integrity, passwords are never stored in SQLite or exposed in the UI.
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end;">
+                    <button id="btn-send-test-email" class="btn btn-secondary" style="border-color: var(--accent-blue);">
+                        &#9993; Send Test Email
+                    </button>
+                    <button id="btn-save-settings" class="btn btn-primary">
+                        Save Preferences
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 2: Severity Threshold Configuration -->
+        <div class="card">
+            <div class="card-title">
+                <span>Notification Severity Rules & Routing</span>
+            </div>
+            <div style="margin-top: 1rem;">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                    Select which incident severity classifications trigger transmissions across each channel. Deduplication algorithms automatically suppress redundant polling dispatches.
+                </p>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                    <!-- Email Channel Severities -->
+                    <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 6px;">
+                            <span>Email Notification Triggers</span>
+                            <span class="badge badge-sm badge-secondary">Gmail</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Recommended: CRITICAL + HIGH</div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="email-sev-critical" value="critical">
+                                <span class="badge badge-critical badge-sm">CRITICAL</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Score 80–100 (Immediate Email)</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="email-sev-high" value="high">
+                                <span class="badge badge-high badge-sm">HIGH</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Score 60–79 (Urgent Email)</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="email-sev-medium" value="medium">
+                                <span class="badge badge-medium badge-sm">MEDIUM</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Score 30–59 (Optional Email)</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="email-sev-low" value="low">
+                                <span class="badge badge-low badge-sm">LOW</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Score 0–29 (Optional Email)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- In-App Channel Severities -->
+                    <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <div style="font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                                <span>In-App Dashboard Alerts</span>
+                                <span class="badge badge-sm badge-secondary">Web UI</span>
+                            </div>
+                            <label class="switch" style="transform: scale(0.8);">
+                                <input type="checkbox" id="inapp-enabled-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Bell dropdown and notification history</div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="inapp-sev-critical" value="critical">
+                                <span class="badge badge-critical badge-sm">CRITICAL</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">All critical threats</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="inapp-sev-high" value="high">
+                                <span class="badge badge-high badge-sm">HIGH</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">All high-risk incidents</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="inapp-sev-medium" value="medium">
+                                <span class="badge badge-medium badge-sm">MEDIUM</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Suspicious access attempts</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="inapp-sev-low" value="low">
+                                <span class="badge badge-low badge-sm">LOW</span>
+                                <span style="font-size: 0.8rem; color: var(--text-secondary);">Informational identity events</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Sidebar: Runtime Status & Setup Instructions -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- Status Card -->
+        <div class="card">
+            <div class="card-title">
+                <span>System & Delivery Status</span>
+            </div>
+            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.85rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem;">
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">SMTP Password:</span>
+                    <span id="stat-pwd-status" class="badge badge-medium badge-sm">Checking...</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem;">
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">Background Worker:</span>
+                    <span id="stat-worker-status" class="badge badge-low badge-sm">Online</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem;">
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">Queued Transmissions:</span>
+                    <span id="stat-queue-size" style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">0</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">Last Successful Email:</span>
+                    <span id="stat-last-success" style="font-size: 0.85rem; color: var(--sev-low); font-weight: 600;">None yet</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">Last Delivery Failure:</span>
+                    <span id="stat-last-failure" style="font-size: 0.85rem; color: var(--text-secondary);">None</span>
+                    <div id="stat-last-error" style="font-size: 0.75rem; color: var(--sev-critical); word-break: break-all; margin-top: 2px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Setup Guide Card -->
+        <div class="card">
+            <div class="card-title">
+                <span>Gmail App Password Setup</span>
+            </div>
+            <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
+                <p style="margin-top: 0;">Google accounts with 2-Step Verification require a dedicated 16-character App Password to connect via SMTP.</p>
+                <ol style="padding-left: 1.25rem; margin-bottom: 1rem;">
+                    <li style="margin-bottom: 0.4rem;">Open your Google Account at <a href="https://myaccount.google.com/security" target="_blank" class="link-cyan">myaccount.google.com/security</a>.</li>
+                    <li style="margin-bottom: 0.4rem;">Verify that <strong>2-Step Verification</strong> is enabled.</li>
+                    <li style="margin-bottom: 0.4rem;">Search for or open <a href="https://myaccount.google.com/apppasswords" target="_blank" class="link-cyan">App passwords</a>.</li>
+                    <li style="margin-bottom: 0.4rem;">Create a password named <code>PrivilegeGuard AI</code>.</li>
+                    <li style="margin-bottom: 0.4rem;">Paste the 16-character password into your local <code>.env</code> file:
+                        <div style="background: var(--bg-primary); padding: 6px 10px; border-radius: 4px; font-family: monospace; font-size: 0.75rem; margin-top: 4px; color: var(--accent-cyan);">
+                            SMTP_PASSWORD=xxxx xxxx xxxx xxxx
+                        </div>
+                    </li>
+                </ol>
+                <p style="margin-bottom: 0; font-size: 0.8rem; color: var(--text-muted);">After updating <code>.env</code>, click "Send Test Email" to verify live connectivity.</p>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const alertEl = document.getElementById("settings-alert");
+
+    function showAlert(msg, isSuccess = true) {
+        alertEl.textContent = msg;
+        alertEl.style.display = "block";
+        if (isSuccess) {
+            alertEl.style.background = "rgba(16, 185, 129, 0.15)";
+            alertEl.style.border = "1px solid var(--sev-low)";
+            alertEl.style.color = "var(--sev-low)";
+        } else {
+            alertEl.style.background = "rgba(239, 68, 68, 0.15)";
+            alertEl.style.border = "1px solid var(--sev-critical)";
+            alertEl.style.color = "var(--sev-critical)";
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function formatDateTime(isoStr) {
+        if (!isoStr) return "None yet";
+        const d = new Date(isoStr);
+        return d.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+    }
+
+    async function loadSettings() {
+        try {
+            const resp = await fetch("/api/notifications/settings");
+            if (!resp.ok) throw new Error("Failed to load settings.");
+            const data = await resp.json();
+            const s = data.settings || {};
+            const st = data.status || {};
+
+            document.getElementById("email-enabled-toggle").checked = !!s.email_enabled;
+            document.getElementById("inapp-enabled-toggle").checked = !!s.inapp_enabled;
+
+            document.getElementById("admin-email").value = s.admin_email || "nk8055444@gmail.com";
+            document.getElementById("smtp-sender").value = s.smtp_sender || "";
+            document.getElementById("smtp-host").value = s.smtp_host || "smtp.gmail.com";
+            document.getElementById("smtp-port").value = s.smtp_port || 465;
+            document.getElementById("smtp-security").value = (s.smtp_security || "SSL").toUpperCase();
+
+            // Email severities checkboxes
+            const emailSevs = s.email_severities || ["high", "critical"];
+            document.getElementById("email-sev-critical").checked = emailSevs.includes("critical");
+            document.getElementById("email-sev-high").checked = emailSevs.includes("high");
+            document.getElementById("email-sev-medium").checked = emailSevs.includes("medium");
+            document.getElementById("email-sev-low").checked = emailSevs.includes("low");
+
+            // In-app severities checkboxes
+            const inappSevs = s.inapp_severities || ["low", "medium", "high", "critical"];
+            document.getElementById("inapp-sev-critical").checked = inappSevs.includes("critical");
+            document.getElementById("inapp-sev-high").checked = inappSevs.includes("high");
+            document.getElementById("inapp-sev-medium").checked = inappSevs.includes("medium");
+            document.getElementById("inapp-sev-low").checked = inappSevs.includes("low");
+
+            // Status sidebar
+            const pwdStatusEl = document.getElementById("stat-pwd-status");
+            if (st.smtp_configured) {
+                pwdStatusEl.textContent = "Configured (.env)";
+                pwdStatusEl.className = "badge badge-low badge-sm";
+            } else {
+                pwdStatusEl.textContent = "Missing in .env";
+                pwdStatusEl.className = "badge badge-critical badge-sm";
+            }
+
+            document.getElementById("stat-worker-status").textContent = st.worker_running ? "Active" : "Stopped";
+            document.getElementById("stat-worker-status").className = st.worker_running ? "badge badge-low badge-sm" : "badge badge-medium badge-sm";
+            document.getElementById("stat-queue-size").textContent = st.queue_pending_count || 0;
+
+            document.getElementById("stat-last-success").textContent = formatDateTime(st.last_email_success);
+            document.getElementById("stat-last-failure").textContent = formatDateTime(st.last_email_failure);
+            document.getElementById("stat-last-error").textContent = st.last_email_error || "";
+
+        } catch (err) {
+            showAlert("Failed to load settings: " + err.message, false);
+        }
+    }
+
+    async function saveSettings() {
+        const emailSevs = [];
+        if (document.getElementById("email-sev-critical").checked) emailSevs.push("critical");
+        if (document.getElementById("email-sev-high").checked) emailSevs.push("high");
+        if (document.getElementById("email-sev-medium").checked) emailSevs.push("medium");
+        if (document.getElementById("email-sev-low").checked) emailSevs.push("low");
+
+        const inappSevs = [];
+        if (document.getElementById("inapp-sev-critical").checked) inappSevs.push("critical");
+        if (document.getElementById("inapp-sev-high").checked) inappSevs.push("high");
+        if (document.getElementById("inapp-sev-medium").checked) inappSevs.push("medium");
+        if (document.getElementById("inapp-sev-low").checked) inappSevs.push("low");
+
+        const payload = {
+            email_enabled: document.getElementById("email-enabled-toggle").checked,
+            inapp_enabled: document.getElementById("inapp-enabled-toggle").checked,
+            admin_email: document.getElementById("admin-email").value.trim(),
+            smtp_sender: document.getElementById("smtp-sender").value.trim(),
+            smtp_host: document.getElementById("smtp-host").value.trim(),
+            smtp_port: parseInt(document.getElementById("smtp-port").value, 10),
+            smtp_security: document.getElementById("smtp-security").value,
+            email_severities: emailSevs,
+            inapp_severities: inappSevs
+        };
+
+        try {
+            const resp = await fetch("/api/notifications/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            const res = await resp.json();
+            if (!resp.ok || !res.success) throw new Error(res.error || "Failed to update settings.");
+
+            showAlert("Notification preferences and severity routing rules saved successfully!", true);
+            loadSettings();
+        } catch (err) {
+            showAlert("Error saving settings: " + err.message, false);
+        }
+    }
+
+    async function sendTestEmail() {
+        const btn = document.getElementById("btn-send-test-email");
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner" style="display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span> Sending...';
+        btn.disabled = true;
+
+        const adminEmail = document.getElementById("admin-email").value.trim();
+
+        try {
+            const resp = await fetch("/api/notifications/test-email", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ recipient: adminEmail })
+            });
+            const res = await resp.json();
+
+            if (resp.ok && res.success) {
+                showAlert(`Test email successfully delivered to ${res.recipient} at ${res.timestamp}!`, true);
+            } else {
+                showAlert(`Test email delivery failed: ${res.error || "Unknown error"}`, false);
+            }
+            loadSettings();
+        } catch (err) {
+            showAlert("Test email network error: " + err.message, false);
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById("btn-save-settings").addEventListener("click", saveSettings);
+    document.getElementById("btn-send-test-email").addEventListener("click", sendTestEmail);
+
+    loadSettings();
+})();
+</script>
+{% endblock %}

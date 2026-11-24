@@ -134,14 +134,24 @@ class IncidentCorrelationEngine:
 
             rule_ids = [alert.get("rule_id") for alert in alerts]
 
-            if "RULE-004" in rule_ids:
+            if "RULE-006" in rule_ids:
+                title = f"Security Audit Log Tampering & Anti-Forensics ({user})"
+            elif "RULE-004" in rule_ids:
                 title = f"Sensitive Asset Access Following Privilege Escalation ({user})"
+            elif "RULE-007" in rule_ids:
+                title = f"Privileged Security Group Membership Addition ({user})"
             elif "RULE-001" in rule_ids and any(ev.event_type == "login_success" for ev in user_events):
                 title = f"Credential Compromise and Account Penetration ({user})"
+            elif "RULE-009" in rule_ids:
+                title = f"Distributed Password Spraying & Credential Harvesting ({user})"
             elif "RULE-003" in rule_ids:
                 title = f"Unauthorized Privilege Grant and Role Modification ({user})"
             elif "RULE-002" in rule_ids:
                 title = f"Unexpected Privilege Escalation to Sensitive Tier ({user})"
+            elif "RULE-008" in rule_ids:
+                title = f"Suspicious Account Creation & Persistence ({user})"
+            elif "RULE-010" in rule_ids:
+                title = f"Explicit Credential Abuse & Lateral Traversal ({user})"
             elif "RULE-005" in rule_ids:
                 title = f"Access Denied Enumeration & Boundary Testing ({user})"
             else:
@@ -204,6 +214,7 @@ class IncidentCorrelationEngine:
             try:
                 processed_incidents: List[Incident] = []
                 reserved_ids: Set[str] = set()
+                notification_targets = []
 
                 for item in prepared_data:
                     user = item["user"]
@@ -227,6 +238,7 @@ class IncidentCorrelationEngine:
 
                     if existing_incident:
                         incident = existing_incident
+                        old_severity = incident.severity
                         incident.title = title
                         incident.last_observed_at = max(incident.last_observed_at, last_ts)
                         incident.risk_score = max(incident.risk_score, risk_score)
@@ -357,9 +369,30 @@ class IncidentCorrelationEngine:
                                 )
                             )
 
+                    notification_targets.append({
+                        "incident": incident,
+                        "is_new": (existing_incident is None),
+                        "old_severity": old_severity if existing_incident else None
+                    })
                     processed_incidents.append(incident)
 
                 db.session.commit()
+
+                # Dispatch notifications for qualifying new incidents or severity escalations
+                try:
+                    from services.notification_service import NotificationDispatcher
+                    for target in notification_targets:
+                        NotificationDispatcher.dispatch_incident_notification(
+                            incident=target["incident"],
+                            is_new=target["is_new"],
+                            old_severity=target["old_severity"]
+                        )
+                except Exception as notif_err:
+                    import logging
+                    logging.getLogger("privilegeguard.notifications").error(
+                        f"Notification dispatch error: {notif_err}"
+                    )
+
                 return processed_incidents
 
             except (OperationalError, SQLAlchemyError) as exc:

@@ -61,3 +61,25 @@ def download_platform_json():
         mimetype="application/json",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@reports_bp.route("/reports/synopsis/pdf")
+@reports_bp.route("/download/synopsis-pdf")
+def download_synopsis_pdf():
+    """Download the official PrivilegeGuard AI Technical Project Synopsis in PDF format."""
+    import os
+    from flask import send_file
+    from scripts.generate_synopsis_pdf import build_pdf
+
+    pdf_filename = "PrivilegeGuard_AI_Project_Synopsis.pdf"
+    pdf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), pdf_filename)
+    
+    if not os.path.exists(pdf_path):
+        build_pdf(pdf_path)
+
+    return send_file(
+        pdf_path,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="PrivilegeGuard_AI_Project_Synopsis.pdf"
+    )
+

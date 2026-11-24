@@ -34,12 +34,18 @@ def create_app(config_class=Config):
     from routes.incidents import incidents_bp
     from routes.ingestion import ingestion_bp
     from routes.reports import reports_bp
+    from routes.collector import collector_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(events_bp)
     app.register_blueprint(incidents_bp)
     app.register_blueprint(ingestion_bp)
     app.register_blueprint(reports_bp)
+    app.register_blueprint(collector_bp)
+
+    from routes.notifications import notifications_bp
+    app.register_blueprint(notifications_bp)
+
 
     # Template utility filters
     @app.template_filter("badge_color")
@@ -77,9 +83,15 @@ def create_app(config_class=Config):
     def file_too_large(error):
         return jsonify({"success": False, "error_message": "File exceeds maximum permitted upload limit (16MB)."}), 413
 
-    # Ensure tables exist
+    # Ensure tables exist and background notification worker starts
     with app.app_context():
         db.create_all()
+
+    # Start asynchronous notification worker
+    if not app.config.get("TESTING"):
+        from services.notification_service import NotificationWorker
+        worker = NotificationWorker.get_instance(app)
+        worker.start(app)
 
     return app
 

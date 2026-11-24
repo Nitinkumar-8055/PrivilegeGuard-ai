@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block title %}Security Notifications & History{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Security Notifications & Alert History</h1>
+        <p class="page-subtitle">Persistent telemetry of correlated incident alerts, severity escalations, and administrator email dispatches.</p>
+    </div>
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <button id="btn-page-mark-all" class="btn btn-secondary">
+            Mark All as Read
+        </button>
+        <a href="{{ url_for('notifications.settings_page') }}" class="btn btn-primary">
+            &#9881; Notification Settings
+        </a>
+    </div>
+</div>
+
+<!-- Metrics Overview Cards -->
+<div class="metrics-grid" style="margin-bottom: 1.5rem;">
+    <div class="metric-card">
+        <div class="metric-title">Total Dispatches</div>
+        <div class="metric-value" id="stat-total-notifs">-</div>
+        <div class="metric-subtitle">Across all active channels</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Unread Alerts</div>
+        <div class="metric-value" id="stat-unread-notifs" style="color: var(--accent-cyan);">-</div>
+        <div class="metric-subtitle">Pending analyst review</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Critical & High Alerts</div>
+        <div class="metric-value" id="stat-crit-notifs" style="color: var(--sev-critical);">-</div>
+        <div class="metric-subtitle">Elevated threat severity</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Email Transmissions</div>
+        <div class="metric-value" id="stat-email-notifs" style="color: var(--accent-purple);">-</div>
+        <div class="metric-subtitle">Dispatched to administrator</div>
+    </div>
+</div>
+
+<!-- Filters Bar -->
+<div class="filter-bar">
+    <div style="flex: 2; min-width: 200px;">
+        <label class="form-label">Search Notifications</label>
+        <input type="text" id="notif-search" class="form-control" placeholder="Search by title, message, or incident ID...">
+    </div>
+    <div style="flex: 1; min-width: 130px;">
+        <label class="form-label">Severity</label>
+        <select id="notif-severity" class="form-control">
+            <option value="">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+        </select>
+    </div>
+    <div style="flex: 1; min-width: 130px;">
+        <label class="form-label">Channel</label>
+        <select id="notif-channel" class="form-control">
+            <option value="">All Channels</option>
+            <option value="in_app">In-App Alerts</option>
+            <option value="email">Gmail SMTP</option>
+        </select>
+    </div>
+    <div style="flex: 1; min-width: 130px;">
+        <label class="form-label">Read Status</label>
+        <select id="notif-read-status" class="form-control">
+            <option value="">All Statuses</option>
+            <option value="false">Unread Only</option>
+            <option value="true">Read Only</option>
+        </select>
+    </div>
+    <div style="align-self: flex-end; display: flex; gap: 0.5rem;">
+        <button id="btn-apply-filters" class="btn btn-primary">Filter</button>
+        <button id="btn-reset-filters" class="btn btn-secondary">Reset</button>
+    </div>
+</div>
+
+<!-- Notifications Table Container -->
+<div class="card">
+    <div class="card-header-flex">
+        <div class="card-title">
+            <span id="notifs-header-count">Incident Dispatches</span>
+        </div>
+        <div id="pagination-controls" style="display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; color: var(--text-muted);">
+            <button id="btn-prev-page" class="btn btn-secondary btn-sm" disabled>&larr; Prev</button>
+            <span id="page-indicator">Page 1 of 1</span>
+            <button id="btn-next-page" class="btn btn-secondary btn-sm" disabled>Next &rarr;</button>
+        </div>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 30px;"></th>
+                    <th>Severity</th>
+                    <th>Channel</th>
+                    <th>Incident ID</th>
+                    <th>Alert Title & Details</th>
+                    <th>Delivery Status</th>
+                    <th>Dispatched At</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="notifications-table-body">
+                <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 3rem;">Loading notification records...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    let currentPage = 1;
+    const perPage = 20;
+
+    function escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function formatDateTime(isoStr) {
+        if (!isoStr) return "N/A";
+        const d = new Date(isoStr);
+        return d.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+    }
+
+    async function loadNotifications(page = 1) {
+        currentPage = page;
+        const tbody = document.getElementById("notifications-table-body");
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">Loading notification records...</td></tr>';
+
+        const search = document.getElementById("notif-search").value.trim();
+        const severity = document.getElementById("notif-severity").value;
+        const channel = document.getElementById("notif-channel").value;
+        const readStatus = document.getElementById("notif-read-status").value;
+
+        const params = new URLSearchParams({
+            page: currentPage,
+            per_page: perPage
+        });
+        if (search) params.append("search", search);
+        if (severity) params.append("severity", severity);
+        if (channel) params.append("channel", channel);
+        if (readStatus) params.append("is_read", readStatus);
+
+        try {
+            const resp = await fetch(`/api/notifications?${params.toString()}`);
+            if (!resp.ok) throw new Error("Failed to query notifications.");
+            const data = await resp.json();
+            const items = data.notifications || [];
+
+            // Update stats
+            document.getElementById("stat-total-notifs").textContent = data.total || 0;
+            document.getElementById("stat-unread-notifs").textContent = data.unread_count || 0;
+            document.getElementById("notifs-header-count").textContent = `Dispatched Notifications (${data.total || 0})`;
+
+            // Pagination state
+            document.getElementById("page-indicator").textContent = `Page ${data.page} of ${data.total_pages || 1}`;
+            document.getElementById("btn-prev-page").disabled = data.page <= 1;
+            document.getElementById("btn-next-page").disabled = data.page >= data.total_pages;
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No security notifications match the specified criteria.</td></tr>';
+                return;
+            }
+
+            let critCount = 0;
+            let emailCount = 0;
+
+            let html = "";
+            items.forEach((n) => {
+                const sev = (n.severity || "medium").toLowerCase();
+                if (sev === "critical" || sev === "high") critCount++;
+                if (n.channel === "email") emailCount++;
+
+                const unreadDot = !n.is_read ? '<span class="unread-dot" title="Unread"></span>' : '';
+                const channelBadge = n.channel === "email" 
+                    ? '<span class="badge badge-secondary" style="font-size:0.75rem;"><span style="color:#38bdf8;">&#9993;</span> Email</span>' 
+                    : '<span class="badge badge-secondary" style="font-size:0.75rem;"><span style="color:#a855f7;">&#128276;</span> In-App</span>';
+
+                let statusBadge = '';
+                if (n.delivery_status === 'sent' || n.delivery_status === 'delivered') {
+                    statusBadge = '<span class="badge badge-low" style="font-size:0.75rem;">Delivered</span>';
+                } else if (n.delivery_status === 'pending') {
+                    statusBadge = '<span class="badge badge-medium" style="font-size:0.75rem;">Queued</span>';
+                } else {
+                    const errTip = n.error_message ? `title="${escapeHtml(n.error_message)}"` : '';
+                    statusBadge = `<span class="badge badge-critical" ${errTip} style="font-size:0.75rem; cursor:help;">Failed &#9888;</span>`;
+                }
+
+                const incLink = n.incident_ref 
+                    ? `<a href="/incidents/${n.incident_ref}" class="link-cyan" style="font-family:monospace; font-weight:600;">${escapeHtml(n.incident_ref)}</a>`
+                    : '<span style="color:var(--text-muted); font-size:0.8rem;">System</span>';
+
+                html += `
+                <tr class="${!n.is_read ? 'row-unread' : ''}">
+                    <td style="text-align:center;">${unreadDot}</td>
+                    <td><span class="badge badge-${sev}">${sev.toUpperCase()}</span></td>
+                    <td>${channelBadge}</td>
+                    <td>${incLink}</td>
+                    <td>
+                        <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">${escapeHtml(n.title)}</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(n.message)}</div>
+                        ${n.error_message ? `<div style="color: var(--sev-critical); font-size: 0.75rem; margin-top: 3px;">&#9888; ${escapeHtml(n.error_message)}</div>` : ''}
+                    </td>
+                    <td>${statusBadge}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">${formatDateTime(n.created_at)}</td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        <button class="btn btn-secondary btn-sm btn-toggle-read" data-id="${n.id}" data-read="${n.is_read}">
+                            ${n.is_read ? 'Mark Unread' : 'Mark Read'}
+                        </button>
+                        <button class="btn btn-secondary btn-sm btn-dismiss-notif" data-id="${n.id}" style="color: var(--sev-critical);" title="Dismiss Notification">
+                            &times;
+                        </button>
+                    </td>
+                </tr>
+                `;
+            });
+
+            document.getElementById("stat-crit-notifs").textContent = critCount;
+            document.getElementById("stat-email-notifs").textContent = emailCount;
+
+            tbody.innerHTML = html;
+
+            // Row actions
+            tbody.querySelectorAll(".btn-toggle-read").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    const id = btn.getAttribute("data-id");
+                    const isRead = btn.getAttribute("data-read") === "true";
+                    const action = isRead ? "unread" : "read";
+                    try {
+                        await fetch(`/api/notifications/${id}/${action}`, { method: "POST" });
+                        loadNotifications(currentPage);
+                    } catch (e) {
+                        console.error("Failed to toggle read state:", e);
+                    }
+                });
+            });
+
+            tbody.querySelectorAll(".btn-dismiss-notif").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    const id = btn.getAttribute("data-id");
+                    if (!confirm("Are you sure you want to dismiss this notification?")) return;
+                    try {
+                        await fetch(`/api/notifications/${id}`, { method: "DELETE" });
+                        loadNotifications(currentPage);
+                    } catch (e) {
+                        console.error("Failed to dismiss notification:", e);
+                    }
+                });
+            });
+
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--sev-critical); padding: 2.5rem;">${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+
+    document.getElementById("btn-apply-filters").addEventListener("click", () => loadNotifications(1));
+    document.getElementById("btn-reset-filters").addEventListener("click", () => {
+        document.getElementById("notif-search").value = "";
+        document.getElementById("notif-severity").value = "";
+        document.getElementById("notif-channel").value = "";
+        document.getElementById("notif-read-status").value = "";
+        loadNotifications(1);
+    });
+
+    document.getElementById("btn-prev-page").addEventListener("click", () => {
+        if (currentPage > 1) loadNotifications(currentPage - 1);
+    });
+    document.getElementById("btn-next-page").addEventListener("click", () => {
+        loadNotifications(currentPage + 1);
+    });
+
+    document.getElementById("btn-page-mark-all").addEventListener("click", async () => {
+        try {
+            await fetch("/api/notifications/mark-all-read", { method: "POST" });
+            loadNotifications(currentPage);
+        } catch (e) {
+            alert("Failed to mark all as read: " + e.message);
+        }
+    });
+
+    // Initial load
+    loadNotifications(1);
+})();
+</script>
+{% endblock %}

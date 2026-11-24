@@ -5,6 +5,8 @@ db = SQLAlchemy()
 from models.events import SecurityEvent
 from models.incidents import Incident, IncidentEvent, DetectionAlert
 from models.audit import AuditLog
+from models.collector import CollectorCheckpoint
+from models.notifications import Notification, NotificationSetting
 
 __all__ = [
     "db",
@@ -12,5 +14,8 @@ __all__ = [
     "Incident",
     "IncidentEvent",
     "DetectionAlert",
-    "AuditLog"
+    "AuditLog",
+    "CollectorCheckpoint",
+    "Notification",
+    "NotificationSetting"
 ]

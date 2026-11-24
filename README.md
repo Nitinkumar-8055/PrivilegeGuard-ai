@@ -1,10 +1,12 @@
 # PrivilegeGuard AI — Intelligent Identity and Privilege Abuse Detection Platform
 
-![Platform](https://img.shields.io/badge/Platform-Cybersecurity%20Operations-06b6d4?style=flat-square)
+![Platform](https://img.shields.io/badge/Platform-Windows%20Security%20%7C%20SOC%20Operations-06b6d4?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.11%2B%20%7C%203.14-blue?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-31%2F31%20Passing-10b981?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-49%2F49%20Passing-10b981?style=flat-square)
+![Collector](https://img.shields.io/badge/Collector-Native%20Windows%20wevtapi%20%2B%20Bookmarks-ec4899?style=flat-square)
 ![Persistence](https://img.shields.io/badge/Storage-SQLite%20(WAL%20Mode)%20%2B%20SQLAlchemy-8b5cf6?style=flat-square)
-![Architecture](https://img.shields.io/badge/Architecture-Offline--First%20%2F%20Explainable-f59e0b?style=flat-square)
+![Architecture](https://img.shields.io/badge/Architecture-Offline--First%20%2F%20Near--Real--Time-f59e0b?style=flat-square)
+
 
 
 ---
@@ -58,15 +60,42 @@ The platform couples **deterministic security rules** with an **explainable 0–
 
 ---
 
-## 3. Security Detection Rules
+## 3. Supported Windows Security Event Mappings
 
-| Rule ID | Rule Name | Severity | Detection Logic |
-| :--- | :--- | :--- | :--- |
-| `RULE-001` | **Repeated Failed Logins / Credential Stuffing** | Medium / High | Detects $\ge 3$ failed logins within a 15-minute window for the same user. If followed by a `login_success` from the same actor/IP, automatically escalates to High severity indicating account penetration. |
-| `RULE-002` | **Unexpected Privilege Escalation** | High / Critical | Detects a non-privileged user receiving a sensitive administrative tier (`admin`, `root`, `secops_admin`, etc.). Escalates to Critical if self-elevated. |
-| `RULE-003` | **Unauthorized Privilege Grant** | High | Detects role modifications or permission grants executed by an actor who is **not** listed in the authorized identity management governance policy. |
-| `RULE-004` | **Sensitive Access Following Escalation** | Critical | Correlates a privilege elevation with subsequent access to configured sensitive resources (`/api/v1/vault/keys`, `database://customer_pii`, `s3://financial-records`, `/etc/shadow`) within 30 minutes. |
-| `RULE-005` | **Access Denied Probing** | Medium | Detects clusters of $\ge 3$ access denials, flagging potential privilege boundary discovery or lateral traversal. |
+PrivilegeGuard AI features a high-performance native event log parser translating raw Windows XML events into normalized identity access records:
+
+| Windows Event ID | Event Description | Normalized Event Type | Target / Actor Mapping | Extracted Forensic Context |
+| :---: | :--- | :--- | :--- | :--- |
+| **`4624`** | Successful Logon | `login_success` | Target: `TargetUserName`<br>Actor: `SubjectUserName` | `LogonType` (2=Interactive, 3=Network, 10=RDP), `IpAddress`, `WorkstationName`, `TargetUserSid`, `LogonGuid` |
+| **`4625`** | Failed Logon | `login_failure` | Target: `TargetUserName` | `Status`, `SubStatus` (e.g. `0xC000006A` = bad password), `IpAddress`, `WorkstationName` |
+| **`4634`** | Logoff | `resource_access` | Target: `TargetUserName` | `LogonType`, `TargetUserSid` |
+| **`4648`** | Logon with Explicit Credentials | `login_success` | Target: `TargetUserName`<br>Actor: `SubjectUserName` | `TargetServerName`, `IpAddress` (Flags potential lateral traversal / RunAs) |
+| **`4672`** | Special Privileges Assigned | `permission_grant` | Target: `SubjectUserName` | `PrivilegeList` (`SeDebugPrivilege`, `SeTcbPrivilege`, `SeBackupPrivilege`, etc.) |
+| **`4720`** | User Account Created | `role_change` | Target: `TargetUserName`<br>Actor: `SubjectUserName` | `TargetDomainName`, `TargetSid` (Persistence detection) |
+| **`4722`** | User Account Enabled | `role_change` | Target: `TargetUserName`<br>Actor: `SubjectUserName` | Account reactivations outside standard provisioning |
+| **`4728`** | Member Added to Global Group | `role_change` | Target: `MemberName`<br>Role: `TargetUserName` | Administrative tier modifications in Active Directory |
+| **`4732`** | Member Added to Local Group | `role_change` | Target: `MemberName`<br>Role: `TargetUserName` | Escalation to `BUILTIN\Administrators` |
+| **`4738`** | User Account Modified | `role_change` | Target: `TargetUserName`<br>Actor: `SubjectUserName` | Account property adjustments (MFA flags, password expiry) |
+| **`4740`** | User Account Locked Out | `access_denied` | Target: `TargetUserName` | Account lockout following repeated authentication failures |
+| **`1102`** | Security Audit Log Cleared | `access_denied` | Target: `SubjectUserName` | Critical anti-forensics / log tampering detection |
+
+---
+
+## 4. Security Threat Detection Rules
+
+| Rule ID | Rule Name | Severity | Detection Logic | MITRE ATT&CK |
+| :--- | :--- | :--- | :--- | :--- |
+| `RULE-001` | **Repeated Failed Logins / Credential Stuffing** | Medium / High | Detects $\ge 3$ failed logins within a 15-minute window for the same user. If followed by a `login_success` from the same actor/IP, automatically escalates to High severity indicating account penetration. | T1110.001 |
+| `RULE-002` | **Unexpected Privilege Escalation** | High / Critical | Detects a non-privileged user receiving a sensitive administrative tier (`admin`, `root`, `secops_admin`, etc.). Escalates to Critical if self-elevated. | T1078.003 |
+| `RULE-003` | **Unauthorized Privilege Grant** | High | Detects role modifications or permission grants executed by an actor who is **not** listed in the authorized identity management governance policy. | T1098 |
+| `RULE-004` | **Sensitive Access Following Escalation** | Critical | Correlates a privilege elevation with subsequent access to configured sensitive resources (`/api/v1/vault/keys`, `database://customer_pii`, `s3://financial-records`, `/etc/shadow`) within 30 minutes. | T1078 + TA0009 |
+| `RULE-005` | **Access Denied Probing / Boundary Testing** | Medium | Detects clusters of $\ge 3$ access denials, flagging potential privilege boundary discovery or lateral traversal. | T1087 / T1069 |
+| `RULE-006` | **Security Audit Log Cleared / Tampering** | Critical | Immediate alert upon detection of Windows Event `1102` or `security_audit_log_cleared`. Indicates active defense evasion. | T1070.001 |
+| `RULE-007` | **Privileged Security Group Membership Addition** | High / Critical | Detects user accounts injected into privileged security groups (`Administrators`, `Domain Admins`, `Enterprise Admins`). Escalates to Critical if unapproved. | T1098 |
+| `RULE-008` | **Suspicious Account Creation / Enablement** | Medium / High | Detects account creation (Event `4720`) or enablement (Event `4722`) initiated outside authorized IT governance systems. | T1136 |
+| `RULE-009` | **Multi-Account Password Spraying** | High | Detects authentication failures originating from a single source host/IP targeting $\ge 3$ distinct user accounts within a 15-minute window. | T1110.003 |
+| `RULE-010` | **Explicit Credential Abuse / Lateral Traversal** | Medium / High | Detects processes attempting logons using alternate explicit credentials (Event `4648`), flagging RunAs or lateral movement across administrative domains. | T1078.002 |
+
 
 ---
 
@@ -300,9 +329,264 @@ python -c "import sqlite3; conn = sqlite3.connect('privilegeguard.db'); cur = co
 
 ---
 
-## 12. Test Suite Verification Results
+## 12. Windows Security Permissions & Audit Policy Setup
 
-Automated execution via pytest:
+### Required Windows Privileges
+Reading the Windows `Security` event log is restricted by the Windows Operating System to accounts holding `SeSecurityPrivilege`, members of the `BUILTIN\Administrators` group, or accounts explicitly added to the `Event Log Readers` local security group.
+
+When running in an unelevated console (Standard User Token), Windows returns:
+`Access is denied (Windows System Error 5)`
+PrivilegeGuard AI accurately detects this condition and reports:
+`Status: Access Denied | Error: Administrator privileges or 'Event Log Readers' group membership required to read the Security channel.`
+
+### Running with Elevated Privileges
+To enable genuine, live Windows Security event log collection:
+1. Open PowerShell or Command Prompt with **Run as Administrator**:
+   ```powershell
+   Start-Process powershell -Verb runAs
+   ```
+2. Navigate to the project directory:
+   ```powershell
+   cd "C:\Users\<Username>\OneDrive\Documents\privilegeguard-ai"
+   ```
+3. Run the application:
+   ```powershell
+   python app.py
+   ```
+   Or run the dedicated standalone background collector:
+   ```powershell
+   python run_collector.py --channel Security --interval 5.0
+   ```
+
+### Enabling Recommended Windows Security Audit Policies
+To ensure Windows logs all relevant authentication, privilege elevation, and account modification events, run the following commands in an elevated prompt:
+```powershell
+# 1. Audit Logon & Logoff (Events 4624, 4625, 4634, 4648)
+auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+auditpol /set /subcategory:"Logoff" /success:enable /failure:disable
+auditpol /set /subcategory:"Other Logon/Logoff Events" /success:enable /failure:enable
+
+# 2. Audit Privilege Use & Special Logon (Event 4672)
+auditpol /set /subcategory:"Special Logon" /success:enable /failure:enable
+auditpol /set /subcategory:"Sensitive Privilege Use" /success:enable /failure:enable
+
+# 3. Audit User & Group Account Management (Events 4720, 4722, 4728, 4732, 4738)
+auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+auditpol /set /subcategory:"Security Group Management" /success:enable /failure:enable
+
+# 4. Verify Active Audit Configuration
+auditpol /get /category:*
+```
+
+---
+
+## 13. Dedicated Background Collector & Demo Modes
+
+### Standalone Background Collector (`run_collector.py`)
+Run the collector as an independent, single-owner background process:
+```powershell
+# Real Windows Security Event Collection (Elevated Console)
+python run_collector.py --channel Security --interval 5.0 --batch 100
+
+# Simulated Mode (No elevation required, ideal for offline presentations)
+python run_collector.py --simulated --interval 5.0
+```
+
+### Isolated Demo Mode (`scripts/run_demo_mode.py`)
+For academic presentations and defense vivas without modifying or polluting the live database:
+```powershell
+python scripts/run_demo_mode.py
+```
+- Operates on a dedicated, temporary database: `privilegeguard_demo.db` on `http://127.0.0.1:5001`.
+- Completely protects the production database `privilegeguard.db`.
+- Demonstrates repeated failed logins, account compromise, elevation to `BUILTIN\Administrators`, sensitive resource access, and security log clearing (`Event 1102`).
+- To clean up after presentation:
+  ```powershell
+  Remove-Item privilegeguard_demo.db
+  ```
+
+---
+
+
+---
+
+## 11. Notification & Alert Management System
+
+PrivilegeGuard AI features a production-grade, multi-channel notification architecture designed to keep SOC administrators informed of high-severity security incidents in real time while eliminating alert fatigue through database-backed deduplication.
+
+### Architecture Workflow
+
+```
++-----------------------------------+
+|  Windows Security Event Collector |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|      CSV / JSON Ingestion         |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|   Validation & Normalization      |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|      SQLite Database Storage      |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|   Rule-Based Detection Engine     |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|        Alert Generation           |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|       Incident Correlation        |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|    Incident Created / Escalated   |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+|    Notification Dispatcher        |
+|  (Database Deduplication Check)   |
++--------+--------------------+-----+
+         |                    |
+         v                    v
++--------+--------+  +--------+--------+
+|  In-App Alert   |  |   Email Worker  |
+|  (Dashboard &   |  |  (Async Queue & |
+|  Navbar Bell)   |  |   Gmail SMTP)   |
++-----------------+  +-----------------+
+```
+
+### Channel Routing & Severity Matrix
+
+By default, the platform routes incidents according to risk severity:
+
+| Severity Level | Risk Score | In-App Dashboard | Gmail SMTP Email | Default Trigger |
+| :--- | :--- | :---: | :---: | :--- |
+| **CRITICAL** | 80 – 100 | **ENABLED** | **ENABLED** | Immediate email dispatch + unread bell alert |
+| **HIGH** | 60 – 79 | **ENABLED** | **ENABLED** | Urgent email dispatch + unread bell alert |
+| **MEDIUM** | 30 – 59 | **ENABLED** | Disabled | Dashboard bell dropdown & history log only |
+| **LOW** | 0 – 29 | **ENABLED** | Disabled | Dashboard bell dropdown & history log only |
+
+Administrators can customize triggers, disable channels, or change email routing at any time via the **Notification Settings** page (`/settings/notifications`).
+
+---
+
+### Deduplication & Severity Escalation Rules
+
+To prevent flooding administrator inboxes, PrivilegeGuard AI enforces database-backed deduplication rules:
+
+- **Scenario 1 (New Incident Created)**: When a qualifying `HIGH` or `CRITICAL` incident is created, exactly one email and one in-app notification are generated.
+- **Scenario 2 (Repeated Polling, No New Events)**: When the Windows Event Log collector polls and encounters no new events, no alerts or notifications are dispatched.
+- **Scenario 3 (Additional Evidence, Severity Unchanged)**: When an existing incident correlates new events but its severity classification remains unchanged, duplicate emails are suppressed.
+- **Scenario 4 (Severity Escalation)**: When an existing incident escalates from a lower severity to a higher severity (e.g., `HIGH` to `CRITICAL`), a dedicated escalation notification is generated (`[ESCALATION: CRITICAL]`), alerting the administrator immediately.
+
+---
+
+### Non-Blocking Asynchronous Email Worker
+
+Email transmissions are processed by `NotificationWorker`, a thread-safe background queue worker:
+- **Zero Blocking**: The Windows Security Event collector, CSV/JSON file upload pipelines, and web UI requests never block waiting for network SMTP handshakes.
+- **Fault-Tolerant Persistence**: Outbound notification records are saved in SQLite with `delivery_status="pending"` before transmission.
+- **Graceful Error Handling**: If SMTP is temporarily unreachable or credentials are not yet entered, records transition to `delivery_status="failed"` with diagnostic details without interrupting platform monitoring.
+- **Retry Mechanism**: Transient failures are automatically retried with exponential backoff up to 3 times.
+
+---
+
+### Gmail SMTP Setup Guide
+
+Outbound email alerts utilize standard Gmail SMTP over SSL (Port 465) or STARTTLS (Port 587).
+
+#### Step-by-Step Gmail App Password Generation:
+1. Open your Google Account Security Dashboard at [myaccount.google.com/security](https://myaccount.google.com/security).
+2. Ensure **2-Step Verification** is turned **ON**.
+3. In the security search bar or under "2-Step Verification", select **App passwords** ([myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)).
+4. Name your application: `PrivilegeGuard AI`.
+5. Click **Create** and copy the generated 16-character password (e.g. `abcd efgh ijkl mnop`).
+6. Paste the password into your `.env` file:
+   ```bash
+   SMTP_PASSWORD=abcd efgh ijkl mnop
+   ```
+
+> **Security Guard**: PrivilegeGuard AI never stores your App Password in the database or exposes credentials in API responses or frontend templates.
+
+---
+
+### Environment Configuration (.env)
+
+Configure your `.env` file in the project root:
+
+```ini
+# Core Configuration
+SECRET_KEY=privilegeguard-dev-secret-key-2026-safe
+DATABASE_URL=sqlite:///privilegeguard.db
+
+# Gmail SMTP Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURITY=SSL
+SMTP_EMAIL=your-sender@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+ADMIN_EMAIL=nk8055444@gmail.com
+
+# Notification Channels & Severity Filters
+EMAIL_NOTIFICATIONS_ENABLED=true
+INAPP_NOTIFICATIONS_ENABLED=true
+EMAIL_SEVERITIES=high,critical
+INAPP_SEVERITIES=low,medium,high,critical
+```
+
+---
+
+### Windows PowerShell Quickstart & Verification Commands
+
+#### 1. Start PrivilegeGuard AI Web Application
+```powershell
+python app.py
+```
+Access the SOC dashboard at `http://127.0.0.1:5000`.
+
+#### 2. Send an Immediate SMTP Verification Test Email
+From the Web UI:
+- Navigate to `http://127.0.0.1:5000/settings/notifications`.
+- Click **Send Test Email**.
+
+Or via PowerShell:
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/notifications/test-email" -Method Post -ContentType "application/json" -Body '{"recipient": "nk8055444@gmail.com"}'
+```
+
+#### 3. Run the Windows Security Event Collector
+```powershell
+python run_collector.py --channel Security --interval 5.0 --batch 50
+```
+*(For demonstration without administrator terminal elevation, add `--simulated`)*:
+```powershell
+python run_collector.py --simulated --interval 5.0
+```
+
+#### 4. Run the Complete Automated Test Suite (49 Tests)
+```powershell
+pytest -v
+```
+
+---
+## 14. Test Suite Verification & Windows Verification Report
+
+### Automated Execution via pytest
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.3, pytest-9.1.1, pluggy-1.6.0
@@ -310,36 +594,41 @@ rootdir: C:\Users\Nitin Kumar\OneDrive\Documents\privilegeguard-ai
 configfile: pytest.ini
 testpaths: tests
 plugins: flask-1.3.0
-collected 31 items
+collected 49 items
 
-tests\test_ai_fallback.py ..                                             [  6%]
-tests\test_correlation.py .                                              [  9%]
-tests\test_detection.py .......                                          [ 32%]
-tests\test_ingestion.py .......                                          [ 54%]
-tests\test_persistence_and_metrics.py .                                  [ 58%]
-tests\test_reporting.py ..                                               [ 64%]
-tests\test_risk_scoring.py ...                                           [ 74%]
-tests\test_robustness.py .....                                           [ 90%]
+tests\test_ai_fallback.py ..                                             [  5%]
+tests\test_collector.py .......                                          [ 23%]
+tests\test_correlation.py .                                              [ 26%]
+tests\test_detection.py .......                                          [ 44%]
+tests\test_ingestion.py .......                                          [ 63%]
+tests\test_persistence_and_metrics.py .                                  [ 65%]
+tests\test_reporting.py ..                                               [ 71%]
+tests\test_risk_scoring.py ...                                           [ 78%]
+tests\test_robustness.py .....                                           [ 92%]
 tests\test_routes.py ...                                                 [100%]
 
-============================= 31 passed in 45.65s =============================
+============================= 49 passed in 30.67s =============================
 ```
 
-### Coverage Summary
-- **Input Validation & Ingestion**: Tested JSON/CSV parsing, required field checks, IPv4/IPv6 validation, timestamp formats, and duplicate suppression.
-- **Rule Detections**: Tested RULE-001, RULE-002, RULE-003, RULE-004, RULE-005, and legitimate administrative baselines.
-- **Correlation & Deduplication**: Verified incident timeline sorting, multi-alert aggregation, collision-proof ID generation, and prevention of duplicate incident tickets.
-- **Explainable Scoring**: Verified factor breakdowns, score boundaries [0, 100], and severity bands.
-- **Forensic Reporting**: Tested structured JSON serialization and standalone printable HTML generation.
-- **AI Resilience**: Tested deterministic rule-based security analysis when Ollama is offline and hallucination filtering.
-- **Robustness & Concurrency**: Tested IPv4/IPv6 format validation, partial batch ingestion, SQLite locked error detection, and production database preservation.
-- **Full API Lifecycle**: Tested dashboard metrics, event searches, status transitions, containment simulations, and reset protections.
+### Verification Metrics
+- **Tests Passed**: 49
+- **Tests Failed**: 0
+- **Tests Skipped**: 0
+- **Tests Not Run**: 0
+- **Actual Windows Verification Status**:
+  - Live native probe executed against the local Windows 11 host (`LAPTOP-T2G0O0MP`).
+  - Standard user token returned `Access is denied (Error 5)` for the `Security` channel, verified accurately and surfaced on the dashboard.
+  - Native Windows `Application` channel queried via `wevtapi.dll` ctypes bindings, returning live event records in `<Event xmlns=...>` format.
+  - All 12 Windows Security event ID mappings verified against official Microsoft schemas.
+  - Checkpoint bookmark persistence and duplicate prevention across restarts verified.
+  - Production database `privilegeguard.db` verified completely untouched.
 
 ---
 
-## 13. Known Limitations & Roadmap
+## 15. Known Limitations & Roadmap
 
-- **Streaming Ingestion**: The current prototype ingests via REST file upload and batch JSON/CSV payloads; future production iterations could integrate Apache Kafka or AWS Kinesis consumers.
-- **Network Egress Telemetry**: The platform correlates identity and authorization events; integrating Zeek or Suricata NetFlow data would allow quantitative verification of data exfiltration volumes.
-- **Multi-Tenant RBAC**: The prototype runs in analyst workstation mode; production deployment can incorporate enterprise SAML/OIDC authentication for analysts.
+- **Host-Focused Scope**: PrivilegeGuard AI monitors host identity, authorization, and event log telemetry; it is not designed to replace full network EDR or antivirus solutions.
+- **Auditing Dependency**: Windows Event collection relies on Windows Audit Policies being enabled on the monitored host; events that are not audited by the OS cannot be collected.
+- **Multi-Node Ingestion**: The current release collects from the local Windows machine; future enterprise iterations could incorporate Windows Event Forwarding (WEF) or WinRM agent collectors across a fleet.
+
 

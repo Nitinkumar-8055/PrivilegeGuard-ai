@@ -223,7 +223,77 @@ class AIAnalysisService:
                 "Access control policies restrict role assignments exclusively to designated Identity Governance managers."
             )
             playbook.append(f"Isolate actor '{actor_str}' and inspect their access history for potential identity provider compromise.")
-            benign_parts.append("An IT helpdesk administrator performing out-of-band manual user assistance without automated workflow integration.")
+        if "RULE-006" in rule_ids:
+            what_happened_parts.append(
+                f"The Windows Security event audit log was intentionally cleared by actor '{user}'."
+            )
+            why_flagged_parts.append(
+                "Clearing security event logs matches MITRE ATT&CK Defense Evasion (T1070.001 - Clear Windows Event Logs). "
+                "Adversaries clear audit trails immediately before or after executing high-privilege operations to hinder forensic reconstruction."
+            )
+            playbook.extend([
+                "Immediately quarantine the host endpoint and extract memory dump if system is still active.",
+                f"Revoke all Kerberos tickets and active session tokens for actor '{user}'.",
+                "Cross-reference centralized SIEM or forwarder logs to inspect events generated prior to log deletion.",
+                "Verify whether an authorized administrator initiated log maintenance via an approved change control ticket."
+            ])
+            benign_parts.append("An IT administrator performing scheduled system imaging or routine event log maintenance.")
+
+        if "RULE-007" in rule_ids:
+            what_happened_parts.append(
+                f"Account '{user}' was injected into an elevated administrative security group (e.g. Administrators or Domain Admins)."
+            )
+            why_flagged_parts.append(
+                "Adding accounts to privileged security groups represents persistent privilege escalation (MITRE ATT&CK T1098)."
+            )
+            playbook.extend([
+                f"Audit authorization tickets for promoting '{user}' to the administrative security group.",
+                "Review who initiated the group membership modification and verify from which workstation.",
+                "Inspect user's subsequent authentication and privilege assignments."
+            ])
+            benign_parts.append("A planned IT role promotion or temporary elevation for scheduled server maintenance.")
+
+        if "RULE-008" in rule_ids:
+            what_happened_parts.append(
+                f"A new user account ('{user}') was created or enabled on the system outside of standard identity workflows."
+            )
+            why_flagged_parts.append(
+                "Unauthorized account creation matches MITRE ATT&CK Persistence (T1136) to maintain access."
+            )
+            playbook.extend([
+                f"Verify with HR/IAM whether account '{user}' is legitimate.",
+                "Check whether the account was assigned administrative privileges or placed in sensitive groups.",
+                "Review the creating actor's logon session for unauthorized remote access."
+            ])
+            benign_parts.append("Provisioning of a new employee or vendor account by authorized IT operations.")
+
+        if "RULE-009" in rule_ids:
+            what_happened_parts.append(
+                f"A distributed authentication assault (password spraying) was detected targeting multiple user accounts from a single source host/IP."
+            )
+            why_flagged_parts.append(
+                "Systematic authentication failures across multiple distinct usernames match MITRE ATT&CK Credential Access (T1110.003)."
+            )
+            playbook.extend([
+                "Block the offending source IP address at network perimeters and VPN gateways.",
+                "Verify whether any targeted account experienced a subsequent successful login.",
+                "Enforce mandatory password reset and MFA challenge for all targeted identities."
+            ])
+            benign_parts.append("A misconfigured automated scanner, vulnerability assessment, or single sign-on sync tool.")
+
+        if "RULE-010" in rule_ids:
+            what_happened_parts.append(
+                f"An authentication attempt was executed using explicit secondary credentials (RunAs / Event 4648) for identity '{user}'."
+            )
+            why_flagged_parts.append(
+                "Explicit credential usage indicates privilege switching, potential lateral movement, or credential reuse."
+            )
+            playbook.extend([
+                f"Verify whether user '{user}' was running an authorized administrative tool with secondary credentials.",
+                "Inspect parent and child processes on the source host for abnormal binaries or script interpreters.",
+                "Check destination server for subsequent command execution."
+            ])
+            benign_parts.append("A system administrator using 'Run as Administrator' or secondary domain credentials for legitimate administrative tasks.")
 
         # Default fallbacks if no specific rule text matched
         if not what_happened_parts:
