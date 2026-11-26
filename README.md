@@ -1,4 +1,4 @@
-# PrivilegeGuard AI — Intelligent Identity and Privilege Abuse Detection Platform
+# PrivilegeGuard AI — Intelligent Privilege Abuse Detection and Security Monitoring System
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20Security%20%7C%20SOC%20Operations-06b6d4?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.11%2B%20%7C%203.14-blue?style=flat-square)
